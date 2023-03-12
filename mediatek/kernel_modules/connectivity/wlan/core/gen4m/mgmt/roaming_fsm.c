@@ -91,12 +91,14 @@
  *                           P R I V A T E   D A T A
  *******************************************************************************
  */
+#if !DBG_DISABLE_ALL_LOG
 static uint8_t *apucDebugRoamingState[ROAMING_STATE_NUM] = {
 	(uint8_t *) DISP_STRING("IDLE"),
 	(uint8_t *) DISP_STRING("DECISION"),
 	(uint8_t *) DISP_STRING("DISCOVERY"),
 	(uint8_t *) DISP_STRING("ROAM")
 };
+#endif
 
 static uint8_t *apucEventStr[ROAMING_EVENT_NUM] = {
 	(uint8_t *) DISP_STRING("START"),
@@ -807,7 +809,9 @@ void roamingFsmRunEventAbort(struct ADAPTER *prAdapter,
 uint32_t roamingFsmProcessEvent(struct ADAPTER *prAdapter,
 	struct CMD_ROAMING_TRANSIT *prTransit)
 {
+#if !DBG_DISABLE_ALL_LOG
 	uint8_t ucBssIndex = prTransit->ucBssidx;
+#endif
 
 	DBGLOG(ROAMING, LOUD,
 	       "[%d] ROAMING Process Events: Current Time = %u\n",

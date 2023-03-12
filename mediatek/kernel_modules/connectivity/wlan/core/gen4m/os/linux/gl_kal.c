@@ -329,8 +329,10 @@ uint32_t kalFirmwareOpen(struct GLUE_INFO *prGlueInfo,
 {
 	uint8_t ucNameIdx;
 	/* PPUINT_8 apucNameTable; */
+#if !DBG_DISABLE_ALL_LOG
 	uint8_t ucCurEcoVer = wlanGetEcoVersion(
 				      prGlueInfo->prAdapter);
+#endif
 	u_int8_t fgResult = FALSE;
 	int ret;
 
@@ -7136,9 +7138,11 @@ kalIndicateBssInfo(struct GLUE_INFO *prGlueInfo,
 		struct cfg80211_bss *bss;
 		struct ieee80211_mgmt *prMgmtFrame = (struct ieee80211_mgmt
 						      *)pucBeaconProbeResp;
-		char *pucBssSubType =
+#if !DBG_DISABLE_ALL_LOG
+        char *pucBssSubType =
 			ieee80211_is_beacon(prMgmtFrame->frame_control) ?
 			"beacon" : "probe_resp";
+#endif
 
 #if CFG_SUPPORT_TSF_USING_BOOTTIME
 		prMgmtFrame->u.beacon.timestamp = kalGetBootTime();
@@ -9596,7 +9600,9 @@ static uint32_t kalPerMonUpdate(struct ADAPTER *prAdapter)
 	struct BSS_INFO *bss;
 	struct net_device *ndev = NULL;
 #if CFG_SUPPORT_LINK_QUALITY_MONITOR
+#if !DBG_DISABLE_ALL_LOG
 	struct WIFI_LINK_QUALITY_INFO *lq = &prAdapter->rLinkQualityInfo;
+#endif
 #endif
 	OS_SYSTIME now, last;
 	int32_t period;

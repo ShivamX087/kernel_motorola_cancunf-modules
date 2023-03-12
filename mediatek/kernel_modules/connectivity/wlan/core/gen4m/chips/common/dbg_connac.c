@@ -371,8 +371,9 @@ void halShowPseInfo(struct ADAPTER *prAdapter)
 
 #undef BUF_SIZE
 }
-
+#if !DBG_DISABLE_ALL_LOG
 static int8_t *sta_ctrl_reg[] = {"ENABLE", "*DISABLE", "*PAUSE"};
+#endif
 static struct EMPTY_QUEUE_INFO Queue_Empty_info[] = {
 	{"CPU Q0",  ENUM_UMAC_CPU_PORT_1,     ENUM_UMAC_CTX_Q_0},
 	{"CPU Q1",  ENUM_UMAC_CPU_PORT_1,     ENUM_UMAC_CTX_Q_1},
@@ -620,6 +621,7 @@ void halShowPleInfo(struct ADAPTER *prAdapter,
 		}
 	}
 
+#if !DBG_DISABLE_ALL_LOG
 	for (j = 0; j < 16; j = j + 4) { /* show AC Q info */
 		for (i = 0; i < 32; i++) {
 			if (((ple_stat[j + 1] & (0x1 << i)) >> i) == 0) {
@@ -639,7 +641,7 @@ void halShowPleInfo(struct ADAPTER *prAdapter,
 			}
 		}
 	}
-
+#endif
 	buf = (char *) kalMemAlloc(BUF_SIZE, VIR_MEM_TYPE);
 	if (buf) {
 		kalMemZero(buf, BUF_SIZE);

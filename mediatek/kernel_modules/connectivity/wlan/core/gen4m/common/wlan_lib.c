@@ -3577,7 +3577,9 @@ uint32_t wlanSetChipEcoInfo(struct ADAPTER *prAdapter)
 {
 	uint32_t hw_version = 0, sw_version = 0;
 	struct mt66xx_chip_info *prChipInfo = prAdapter->chip_info;
+#if !DBG_DISABLE_ALL_LOG
 	uint32_t chip_id = prChipInfo->chip_id;
+#endif
 	/* WLAN_STATUS status; */
 	uint32_t u4Status = WLAN_STATUS_SUCCESS;
 

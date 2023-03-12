@@ -4068,9 +4068,10 @@ void nicTxProcessTxDoneEvent(struct ADAPTER *prAdapter,
 				prAdapter->chip_info->prTxDescOps;
 			uint8_t ucNss, ucStbc;
 			int8_t icTxPwr;
+#if !DBG_DISABLE_ALL_LOG
 			uint32_t *pu4RawTxs;
-
 			pu4RawTxs = (uint32_t *)&prTxDone->aucRawTxS[0];
+#endif
 			if (prTxDescOps) {
 				ucNss = (prTxDone->u2TxRate &
 					prTxDescOps->u2TxdFrNstsMask) >>

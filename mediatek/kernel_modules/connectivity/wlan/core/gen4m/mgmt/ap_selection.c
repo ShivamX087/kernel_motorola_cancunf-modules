@@ -221,6 +221,7 @@ struct WEIGHT_CONFIG gasMtkWeightConfig[ROAM_TYPE_NUM] = {
 	}
 };
 
+#if !DBG_DISABLE_ALL_LOG
 static uint8_t *apucBandStr[BAND_NUM] = {
 	(uint8_t *) DISP_STRING("NULL"),
 	(uint8_t *) DISP_STRING("2.4G"),
@@ -230,6 +231,7 @@ static uint8_t *apucBandStr[BAND_NUM] = {
 	(uint8_t *) DISP_STRING("6G")
 #endif
 };
+#endif
 
 struct NETWORK_SELECTION_POLICY_BY_BAND networkReplaceHandler[BAND_NUM] = {
 	[BAND_2G4] = {BAND_2G4, scanNetworkReplaceHandler2G4},
@@ -1172,7 +1174,7 @@ uint16_t scanCalculateTotalScore(struct ADAPTER *prAdapter,
 		prBssDesc->ucChannelNum,
 		prBssDesc->eBand);
 	char extra[16] = {0};
-#else
+#elif !DBG_DISABLE_ALL_LOG
 	char *extra = "";
 #endif
 	int8_t cRssi = -128;
@@ -1453,6 +1455,9 @@ struct BSS_DESC *apsSearchBssDescByScore(struct ADAPTER *prAdapter,
 	int32_t base, goal;
 #endif
 	uint8_t ucAisIdx;
+#if !DBG_DISABLE_ALL_LOG
+    uint16_t u2CandBssScoreForLowRssi = 0;
+#endif
 
 	if (!prAdapter || eRoamReason >= ROAMING_REASON_NUM) {
 		log_dbg(SCN, ERROR,

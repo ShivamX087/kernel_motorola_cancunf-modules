@@ -1291,6 +1291,7 @@ void dumpLinkStatsIface(struct STATS_LLS_WIFI_IFACE_STAT *iface)
 			iface->num_peers);
 }
 
+#if !DBG_DISABLE_ALL_LOG
 void dumpLinkStatsAc(struct STATS_LLS_WMM_AC_STAT *ac_stat,
 		enum ENUM_STATS_LLS_AC ac)
 {
@@ -1316,7 +1317,6 @@ void dumpLinkStatsAc(struct STATS_LLS_WMM_AC_STAT *ac_stat,
 			ac_stat[ac].contention_num_samples);
 }
 
-
 void dumpLinkStatsPeerInfo(struct STATS_LLS_PEER_INFO *peer, uint32_t idx)
 {
 	static const char * const type[STATS_LLS_WIFI_PEER_INVALID + 1] = {
@@ -1331,7 +1331,6 @@ void dumpLinkStatsPeerInfo(struct STATS_LLS_PEER_INFO *peer, uint32_t idx)
 			peer->bssload.chan_util,
 			peer->num_rate);
 }
-
 
 void dumpLinkStatsRate(struct STATS_LLS_RATE_STAT *rate, uint32_t idx)
 {
@@ -1391,6 +1390,7 @@ void dumpLinkStatsChannel(struct STATS_LLS_CHANNEL_STAT *channel, uint32_t idx)
 			channel->on_time,
 			channel->cca_busy_time);
 }
+#endif
 
 /**
  * find_peer_starec() - return a station record by matching peer's MAC address
@@ -1579,9 +1579,11 @@ uint32_t fill_peer_info(uint8_t *dst, struct PEER_INFO_RATE_STAT *src,
 			}
 		}
 
+#if !DBG_DISABLE_ALL_LOG
 		if (prWifiVar->fgLinkStatsDump)
 			dumpLinkStatsPeerInfo(dst_peer, i);
-		dst += sizeof(struct STATS_LLS_PEER_INFO);
+#endif
+        dst += sizeof(struct STATS_LLS_PEER_INFO);
 
 		dst_peer->num_rate = 0;
 		dst_rate = (struct STATS_LLS_RATE_STAT *)dst;
@@ -1615,9 +1617,11 @@ uint32_t fill_peer_info(uint8_t *dst, struct PEER_INFO_RATE_STAT *src,
 					sizeof(struct STATS_LLS_RATE_STAT));
 
 				dst_rate->rx_mpdu = rxMpduCount;
+#if !DBG_DISABLE_ALL_LOG
 				if (prWifiVar->fgLinkStatsDump)
 					dumpLinkStatsRate(dst_rate, j);
-				dst_rate++;
+#endif
+                dst_rate++;
 			}
 		}
 		dst += sizeof(struct STATS_LLS_RATE_STAT) * dst_peer->num_rate;
@@ -1682,11 +1686,13 @@ uint32_t fill_iface(uint8_t *dst, struct HAL_LLS_FW_REPORT *src,
 
 	fill_iface_ac_mpdu(prAdapter, bss_idx, iface);
 
+#if !DBG_DISABLE_ALL_LOG
 	if (prAdapter->rWifiVar.fgLinkStatsDump) {
 		dumpLinkStatsIface(iface);
 		for (ac = 0; ac < STATS_LLS_WIFI_AC_MAX; ac++)
 			dumpLinkStatsAc(iface->ac, ac);
 	}
+#endif
 	dst += sizeof(struct STATS_LLS_WIFI_IFACE_STAT);
 
 	dst += fill_peer_info(dst, src->peer_info,
@@ -1734,7 +1740,9 @@ uint32_t fill_radio(uint8_t *dst, struct WIFI_RADIO_CHANNEL_STAT *src,
 	struct STATS_LLS_WIFI_RADIO_STAT *radio;
 	struct STATS_LLS_CHANNEL_STAT *src_ch;
 	struct STATS_LLS_CHANNEL_STAT *dst_ch;
+#if !DBG_DISABLE_ALL_LOG
 	struct WIFI_VAR *prWifiVar = &prAdapter->rWifiVar;
+#endif
 	uint8_t band = bandMaskByBssIdx(prAdapter, bss_idx);
 	uint8_t *orig = dst;
 	uint32_t i, j;
@@ -1756,8 +1764,10 @@ uint32_t fill_radio(uint8_t *dst, struct WIFI_RADIO_CHANNEL_STAT *src,
 		radio->num_tx_levels = TX_POWER_LEVELS;
 		dst += sizeof(struct STATS_LLS_WIFI_RADIO_STAT);
 
+#if !DBG_DISABLE_ALL_LOG
 		if (prWifiVar->fgLinkStatsDump)
 			dumpLinkStatsRadio(radio, i);
+#endif
 		radio->num_channels = 0;
 
 		src_ch = src->channel;
@@ -1768,8 +1778,10 @@ uint32_t fill_radio(uint8_t *dst, struct WIFI_RADIO_CHANNEL_STAT *src,
 				continue;
 			radio->num_channels++;
 			kalMemCopyFromIo(dst_ch, src_ch, sizeof(*dst_ch));
-			if (prWifiVar->fgLinkStatsDump)
+#if !DBG_DISABLE_ALL_LOG
+            if (prWifiVar->fgLinkStatsDump)
 				dumpLinkStatsChannel(dst_ch, j);
+#endif
 			dst_ch++;
 		}
 
