@@ -14,6 +14,6 @@ define_mgk_ko(
         "Kbuild",
         "Makefile",
     ]) + [
-        "//motorola/kernel/modules:public_headers",
+        "//vendor/motorola:public_headers",
     ],
 )

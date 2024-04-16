@@ -16,7 +16,7 @@ define_mgk_ko(
         "Makefile.include",
     ]),
     deps = [
-        "//motorola/kernel/modules/drivers/power/wt6670f_qc3p_mmi:wt6670f_qc3p_mmi",
+        "//vendor/motorola/drivers/power/wt6670f_qc3p_mmi:wt6670f_qc3p_mmi",
     ],
     outs = ["mmi_decrete_charger_cp_qc3p.ko"],
 )

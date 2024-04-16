@@ -3,10 +3,10 @@ EXTRA_CFLAGS += -Wall
 EXTRA_CFLAGS += \
 		-I$(ANDROID_BUILD_TOP)/kernel-5.10/drivers/gpu/drm/mediatek/mediatek_v2/ \
 		-I$(ANDROID_BUILD_TOP)/kernel-5.10/drivers/gpu/drm/
-EXTRA_CFLAGS += -I$(ANDROID_BUILD_TOP)/motorola/kernel/modules/include \
-		-I$(ANDROID_BUILD_TOP)/motorola/kernel/modules/drivers/sensors \
-		-I$(ANDROID_BUILD_TOP)/motorola/kernel/modules/drivers/input/touchscreen/focaltech_0flash_mmi_v2 \
-		-I$(ANDROID_BUILD_TOP)/motorola/kernel/modules/drivers/input/touchscreen/focaltech_0flash_mmi_v2/include
+EXTRA_CFLAGS += -I$(ANDROID_BUILD_TOP)/vendor/motorola/include \
+		-I$(ANDROID_BUILD_TOP)/vendor/motorola/drivers/sensors \
+		-I$(ANDROID_BUILD_TOP)/vendor/motorola/drivers/input/touchscreen/focaltech_0flash_mmi_v2 \
+		-I$(ANDROID_BUILD_TOP)/vendor/motorola/drivers/input/touchscreen/focaltech_0flash_mmi_v2/include
 
 ifneq ($(filter m y, $(CONFIG_BOARD_USES_DOUBLE_TAP_CTRL)),)
 	EXTRA_CFLAGS += -DCONFIG_BOARD_USES_DOUBLE_TAP_CTRL

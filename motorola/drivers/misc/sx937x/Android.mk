@@ -1,4 +1,4 @@
-DLKM_DIR := motorola/kernel/modules
+DLKM_DIR := vendor/motorola
 LOCAL_PATH := $(call my-dir)
 
 ifeq ($(SX937X_USB_CAL),true)

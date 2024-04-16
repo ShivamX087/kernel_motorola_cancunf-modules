@@ -1,4 +1,4 @@
-DLKM_DIR := motorola/kernel/modules
+DLKM_DIR := vendor/motorola
 LOCAL_PATH := $(call my-dir)
 
 ifeq ($(CHIPONE_GPIO_CTRL_VDD),true)
