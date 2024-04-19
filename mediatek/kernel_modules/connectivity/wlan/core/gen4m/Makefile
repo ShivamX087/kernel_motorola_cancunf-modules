@@ -1,5 +1,5 @@
 ccflags-y :=
-CFG_DIR ?= $(src)/configs
+CFG_DIR ?= $(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/configs
 
 ifeq ($(CONFIG_MTK_PLATFORM),)
     CONFIG_MTK_PLATFORM := mt$(WLAN_CHIP_ID)
@@ -21,7 +21,7 @@ ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF),)
 ifneq ($(src),)
 ifneq ($(srctree),)
 hif=pcie
-include $(srctree)/$(src)/Makefile.x86
+include $(srctree)/$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/Makefile.x86
 src:=$(srctree)/$(shell echo ${src})
 MTK_COMBO_CHIP=MT7961
 $(info Kbuild chip: $(MTK_COMBO_CHIP))
@@ -897,15 +897,15 @@ endif
 
 ifeq ($(CONFIG_MTK_WIFI_CONNFEM_SUPPORT), y)
 ccflags-y += -DCFG_SUPPORT_CONNFEM=1
-ccflags-y += -I$(src)/../connfem/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/../connfem/include
 else
 ccflags-y += -DCFG_SUPPORT_CONNFEM=0
 endif
 
 ifeq ($(CONFIG_MTK_WIFI_CONNV3_SUPPORT), y)
     ccflags-y += -DCFG_MTK_WIFI_CONNV3_SUPPORT=1
-    ifneq ($(wildcard $(src)/../conninfra),)
-        CONFIG_MTK_WIFI_CONNV3_PATH ?= $(src)/../conninfra
+    ifneq ($(wildcard $(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/../conninfra),)
+        CONFIG_MTK_WIFI_CONNV3_PATH ?= $(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/../conninfra
         KBUILD_EXTRA_SYMBOLS += $(CONFIG_MTK_WIFI_CONNV3_PATH)/Module.symvers
     else
         CONFIG_MTK_WIFI_CONNV3_PATH ?= $(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra
@@ -1251,9 +1251,7 @@ else
     ccflags-y += -DCFG_ENABLE_GKI_SUPPORT=0
 endif
 
-ifeq ($(MODULE_NAME),)
-MODULE_NAME := wlan_$(shell echo $(strip $(WLAN_CHIP_ID)) | tr A-Z a-z)_$(CONFIG_MTK_COMBO_WIFI_HIF)
-endif
+MODULE_NAME := wlan_drv_gen4m_$(WLAN_CHIP_ID)
 
 ifeq ($(CONFIG_MTK_COMBO_SLT), golden)
 slt_postfix = _mc
@@ -1265,13 +1263,13 @@ ifeq ($(CONFIG_CHIP_RESET_SUPPORT), n)
 endif
 
 ccflags-y += -DDBG=0
-ccflags-y += -I$(src)/os -I$(src)/os/$(os)/include
-ccflags-y += -I$(src)/include -I$(src)/include/nic -I$(src)/include/mgmt -I$(src)/include/chips
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include/nic -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include/mgmt -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include/chips
 ifeq ($(CONFIG_MTK_WIFI_NAN), y)
-ccflags-y += -I$(src)/include/nan -I$(src)/include/nan/wpa_supp
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include/nan -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include/nan/wpa_supp
 endif
 ifeq ($(CFG_SUPPORT_WIFI_SYSDVT), 1)
-ccflags-y += -I$(src)/include/dvt
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include/dvt
 endif
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/
@@ -1317,22 +1315,22 @@ ccflags-y += -DCFG_ADVANCED_80211_MLO=0
 endif
 
 ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), sdio)
-ccflags-y += -I$(src)/os/$(os)/hif/sdio/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/hif/sdio/include
 else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), pcie)
-ccflags-y += -I$(src)/os/$(os)/hif/common/include
-ccflags-y += -I$(src)/os/$(os)/hif/pcie/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/hif/common/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/hif/pcie/include
 ifneq ($(findstring 3_0,$(MTK_COMBO_CHIP)),)
-ccflags-y += -I$(src)/include/chips/coda/soc3_0
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/include/chips/coda/soc3_0
 endif
 else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), axi)
-ccflags-y += -I$(src)/os/$(os)/hif/common/include
-ccflags-y += -I$(src)/os/$(os)/hif/axi/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/hif/common/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/hif/axi/include
 else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), usb)
-ccflags-y += -I$(src)/os/$(os)/hif/usb/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/hif/usb/include
 else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), ut)
-ccflags-y += -I$(src)/test -I$(src)/test/lib/include -I$(src)/test/testcases -I$(src)/test/lib/hif
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/test -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/test/lib/include -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/test/testcases -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/test/lib/hif
 else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), none)
-ccflags-y += -I$(src)/os/$(os)/hif/none/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/os/$(os)/hif/none/include
 endif
 
 ifneq ($(PLATFORM_FLAGS), )
@@ -1812,7 +1810,7 @@ endif
 # ---------------------------------------------------
 ifneq ($(PLAT_DIR),)
 
-PLAT_PRIV_C = $(src)/$(PLAT_DIR)plat_priv.c
+PLAT_PRIV_C = $(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(PLAT_DIR)plat_priv.c
 
 # search path (out of kernel tree)
 IS_EXIST_PLAT_PRIV_C := $(wildcard $(PLAT_PRIV_C))
@@ -1853,10 +1851,10 @@ endif
 ifeq ($(MTK_WLAN_SERVICE), yes)
 ccflags-y += -DCONFIG_WLAN_SERVICE=1
 ccflags-y += -DCONFIG_TEST_ENGINE_OFFLOAD=1
-ccflags-y += -I$(src)/$(SERVICE_DIR)include
-ccflags-y += -I$(src)/$(SERVICE_DIR)service/include
-ccflags-y += -I$(src)/$(SERVICE_DIR)glue/osal/include
-ccflags-y += -I$(src)/$(SERVICE_DIR)glue/hal/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(SERVICE_DIR)include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(SERVICE_DIR)service/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(SERVICE_DIR)glue/osal/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(SERVICE_DIR)glue/hal/include
 $(info $$CCFLAG is [{$(ccflags-y)}])
 SERVICE_OBJS := $(SERVICE_DIR)agent/agent.o \
                 $(SERVICE_DIR)service/service_test.o \
@@ -1882,7 +1880,7 @@ $(MODULE_NAME)-objs  += $(NAN_OBJS)
 $(MODULE_NAME)-objs  += $(NAN_SEC_OBJS)
 
 ifneq ($(findstring UT_TEST_MODE,$(MTK_COMBO_CHIP)),)
-include $(src)/test/ut.make
+include $(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/test/ut.make
 endif
 
 #
@@ -1890,7 +1888,7 @@ endif
 #
 ifeq ($(CONFIG_MTK_PREALLOC_MEMORY), y)
 ccflags-y += -DCFG_PREALLOC_MEMORY
-ccflags-y += -I$(src)/prealloc/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/prealloc/include
 MODULE_NAME_PREALLOC = $(MODULE_NAME)_prealloc
 PREALLOC_OBJS := prealloc/prealloc.o
 $(MODULE_NAME_PREALLOC)-objs += $(PREALLOC_OBJS)
@@ -1902,7 +1900,7 @@ endif
 #
 ifeq ($(CONFIG_GKI_SUPPORT), y)
 ccflags-y += -DCFG_CHIP_RESET_KO_SUPPORT
-ccflags-y += -I$(src)/reset/include
+ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/reset/include
 MODULE_NAME_RESET = $(MODULE_NAME)_reset
 RESET_OBJS := reset/reset.o
 $(MODULE_NAME_RESET)-objs += $(RESET_OBJS)
@@ -1919,3 +1917,16 @@ ifeq ($(WMT_SUPPORT), y)
 else
     ccflags-y += -Wframe-larger-than=2048
 endif
+
+extra_symbols := $(abspath $(O)/../vendor/mediatek/kernel_modules/connectivity/conninfra/Module.symvers)
+extra_symbols += $(abspath $(O)/../vendor/mediatek/kernel_modules/connectivity/connfem/Module.symvers)
+extra_symbols += $(abspath $(O)/../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/Module.symvers)
+
+all:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) modules $(KBUILD_OPTIONS) KBUILD_EXTRA_SYMBOLS="$(extra_symbols)"
+
+modules_install:
+	$(MAKE) M=$(M) -C $(KERNEL_SRC) modules_install
+
+clean:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) clean
