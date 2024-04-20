@@ -24,7 +24,7 @@
 #ifdef CONFIG_CHIPONE_GPIO_CTRL_VDD
 #define  USE_PLATFORM_BUS           0
 #else
-//#define  USE_PLATFORM_BUS           0
+#define  USE_PLATFORM_BUS           0
 #endif
 
 #ifdef CONFIG_CHIPONE_PMIC_CTRL_VDD
@@ -40,7 +40,7 @@
 #ifdef CONFIG_CHIPONE_GPIO_CTRL_VDD
 #define FPSENSOR_USE_POWER_GPIO     1        // 0: not use power gpio  1 user power gpio
 #else
-#define FPSENSOR_USE_POWER_GPIO     0        // 0: not use power gpio  1£ºpower gpio
+#define FPSENSOR_USE_POWER_GPIO     0        // 0: not use power gpio  1ï¿½ï¿½power gpio
 #endif
 
 /*********************** SPI GPIO setting **********************/
