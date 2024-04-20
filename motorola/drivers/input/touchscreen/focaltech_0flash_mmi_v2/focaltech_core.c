@@ -46,7 +46,7 @@
 #endif
 
 #ifdef CFG_MTK_PANEL_NOTIFIER
-#include "mtk_disp_notify.h"
+#include <linux/mtk_disp_notify.h>
 #else
 #if defined(CONFIG_DRM)
 #if defined(CONFIG_DRM_PANEL)
