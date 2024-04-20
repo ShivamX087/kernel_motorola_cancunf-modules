@@ -59,7 +59,7 @@
 #else /* CONFIG_PANEL_NOTIFICATIONS */
 #if defined(CONFIG_MTK_PANEL_NOTIFICATIONS)
 #include "mtk_disp_notify.h"
-#include "mtk_panel_ext.h"
+#include <linux/mtk_panel_ext.h>
 
 #define REGISTER_PANEL_NOTIFIER {\
 	struct ts_mmi_dev_pdata *ppdata = &touch_cdev->pdata; \

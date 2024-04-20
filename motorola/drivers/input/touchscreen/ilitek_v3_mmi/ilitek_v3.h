@@ -90,7 +90,7 @@
 #endif
 
 #if IS_ENABLED(CONFIG_DRM_MEDIATEK)
-#include "mtk_panel_ext.h"
+#include <linux/mtk_panel_ext.h>
 #include "mtk_disp_notify.h"
 #endif
 

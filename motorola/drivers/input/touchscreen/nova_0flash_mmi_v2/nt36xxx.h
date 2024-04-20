@@ -32,7 +32,7 @@
 #include "nt36xxx_mem_map.h"
 
 #if defined(CFG_MTK_PANEL_NOTIFIER) || IS_ENABLED(CONFIG_DRM_MEDIATEK)
-#include "mtk_panel_ext.h"
+#include <linux/mtk_panel_ext.h>
 #include "mtk_disp_notify.h"
 #endif
 

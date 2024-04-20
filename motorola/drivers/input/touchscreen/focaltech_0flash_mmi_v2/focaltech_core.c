@@ -37,7 +37,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
-#include "mtk_panel_ext.h"
+#include <linux/mtk_panel_ext.h>
 
 #include "focaltech_core.h"
 
