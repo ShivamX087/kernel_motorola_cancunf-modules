@@ -15,13 +15,7 @@ RGX_TOP := $(if $(filter /%,$(src)),,$(srctree)/)$(src)
 $(info [GPU_DEBUG] MTK_PLATFORM = $(MTK_PLATFORM))
 $(info [GPU_DEBUG] RGX_TOP=$(RGX_TOP))
 
-ifeq ($(MTK_DDK_DEBUG),y)
-	ccflags-y += -include $(RGX_TOP)/include/config_kernel_debug_$(MTK_PLATFORM).h
-else ifeq ($(CONFIG_MTK_ENG_BUILD),y)
-	ccflags-y += -include $(RGX_TOP)/include/config_kernel_eng_$(MTK_PLATFORM).h
-else
-	ccflags-y += -include $(RGX_TOP)/include/config_kernel_user_$(MTK_PLATFORM).h
-endif
+ccflags-y += -include $(RGX_TOP)/include/config_kernel_user_$(MTK_PLATFORM).h
 
 ccflags-y += \
 	-D__linux__ $(OPTIM) -g \
