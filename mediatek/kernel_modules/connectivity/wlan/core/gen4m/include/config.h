@@ -75,6 +75,19 @@
  */
 
 /*******************************************************************************
+ *                                 M A C R O S
+ *******************************************************************************
+ */
+#define WM_RAM_TYPE_MOBILE			0
+#define WM_RAM_TYPE_CE				1
+
+#define IS_MOBILE_SEGMENT \
+	(CONFIG_WM_RAM_TYPE == WM_RAM_TYPE_MOBILE)
+
+#define IS_CE_SEGMENT \
+	(CONFIG_WM_RAM_TYPE == WM_RAM_TYPE_CE)
+
+/*******************************************************************************
  *                              C O N S T A N T S
  *******************************************************************************
  */
@@ -168,6 +181,17 @@
 #ifndef CFG_SUPPORT_IDC_CH_SWITCH
 #define CFG_SUPPORT_IDC_CH_SWITCH	1
 #endif
+#endif
+
+#define CFG_SUPPORT_IDC_RIL_BRIDGE  (CFG_SUPPORT_IDC_CH_SWITCH)
+#ifdef CFG_MTK_WIFI_SOC_S5E9925_SUPPORT
+#define CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY  (CFG_SUPPORT_IDC_RIL_BRIDGE)
+#endif
+#ifndef CFG_SUPPORT_IDC_RIL_BRIDGE
+#define CFG_SUPPORT_IDC_RIL_BRIDGE (0)
+#endif
+#ifndef CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY
+#define CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY (0)
 #endif
 
 #if (CFG_SUPPORT_DFS == 1)	/* Add by Enlai */
@@ -349,6 +373,10 @@
 #define CFG_SUPPORT_ICS                 1
 #define CFG_SUPPORT_PHY_ICS             1
 #endif
+
+#ifndef CFG_SUPPORT_ICS_TIMESYNC
+#define CFG_SUPPORT_ICS_TIMESYNC        1
+#endif /* CFG_SUPPORT_ICS_TIMESYNC */
 
 #define CFG_SUPPORT_BAR_DELAY_INDICATION	1
 
@@ -721,7 +749,7 @@
 #define CFG_MAX_COMMON_IE_BUF_LEN         ((1500 * CFG_MAX_NUM_BSS_LIST) / 3)
 
 /*! Maximum size of Header buffer of each SCAN record */
-#define CFG_RAW_BUFFER_SIZE                     1024
+#define CFG_RAW_BUFFER_SIZE                     1160
 
 /*------------------------------------------------------------------------------
  * Flags and Parameters for Power management
@@ -1639,6 +1667,18 @@
 #define CFG_SUPPORT_P2P_PREFERRED_FREQ_LIST  1
 
 /*------------------------------------------------------------------------------
+ * Driver supports p2p listen offload
+ *------------------------------------------------------------------------------
+ */
+#define CFG_SUPPORT_P2P_LISTEN_OFFLOAD  1
+
+/*------------------------------------------------------------------------------
+ * Driver supports p2p ecsa
+ *------------------------------------------------------------------------------
+ */
+#define CFG_SUPPORT_P2P_ECSA  1
+
+/*------------------------------------------------------------------------------
  * Flag used for P2P GO to find the best channel list
  * Value 0: Disable
  * Value 1: Enable
@@ -1780,6 +1820,10 @@
 
 #ifndef CFG_SUPPORT_MDDP_AOR
 #define CFG_SUPPORT_MDDP_AOR 0
+#endif
+
+#ifndef CFG_SUPPORT_MDDP_SHM
+#define CFG_SUPPORT_MDDP_SHM 0
 #endif
 
 /*------------------------------------------------------------------------------
@@ -1940,7 +1984,7 @@
 #endif
 
 #if (CFG_SUPPORT_NAN == 1)
-#define CFG_SUPPORT_NAN_ADVANCE_DATA_CONTROL 1
+#define CFG_SUPPORT_NAN_ADVANCE_DATA_CONTROL 2
 #define CFG_SUPPORT_NAN_CARRIER_ON_INIT 1
 #define CFG_NAN_BSS_SEPARATE_SEC_ROLE 0
 #define CFG_NAN_PMF_PATCH 1 /* special handle for peer send PMF w/ NMI */
@@ -2051,7 +2095,7 @@
 #define CFG_SUPPORT_MCC_BOOST_CPU 1
 #if CFG_SUPPORT_MCC_BOOST_CPU
 #define MCC_BOOST_LEVEL 1
-#define MCC_BOOST_MIN_TIME 50
+#define MCC_BOOST_MIN_TIME 70
 #endif /* CFG_SUPPORT_MCC_BOOST_CPU */
 
 #define CFG_SUPPORT_ANDROID_DUAL_STA 0
@@ -2270,6 +2314,7 @@
 #define CFG_AP_80211V_SUPPORT 0
 #endif
 
+#define CFG_SUPPORT_DISABLE_CMD_DDONE_INTR    1
 #define CFG_SUPPORT_DISABLE_DATA_DDONE_INTR   1
 
 /*------------------------------------------------------------------------------
@@ -2317,8 +2362,8 @@
  * Flags of Fast Path Feature Support
  *------------------------------------------------------------------------------
  */
-#ifndef CFG_MSCS_SUPPORT
-#define CFG_MSCS_SUPPORT 0
+#ifndef CFG_FAST_PATH_SUPPORT
+#define CFG_FAST_PATH_SUPPORT 0
 #endif
 
 #define CFG_SUPPORT_RTT			(1)
@@ -2332,6 +2377,115 @@
 #endif
 
 #define CFG_SUPPORT_SW_BIP_GMAC	1
+
+/*------------------------------------------------------------------------------
+ * Flags of Advanced TDLS Support
+ *------------------------------------------------------------------------------
+ */
+#if (CFG_TC10_FEATURE == 1) && (CFG_SUPPORT_TDLS == 1)
+#define CFG_SUPPORT_TDLS_OFFCHANNEL	1
+#define CFG_SUPPORT_TDLS_ADJUST_BW	1
+#define CFG_SUPPORT_TDLS_P2P	1
+#define CFG_SUPPORT_TDLS_P2P_AUTO	1
+#if (CFG_SUPPORT_802_11AX == 1)
+#define CFG_SUPPORT_TDLS_11AX		1
+#endif
+#endif
+
+#ifndef CFG_SUPPORT_TDLS_OFFCHANNEL
+#define CFG_SUPPORT_TDLS_OFFCHANNEL	0
+#endif
+#ifndef CFG_SUPPORT_TDLS_11AX
+#define CFG_SUPPORT_TDLS_11AX	0
+#endif
+#ifndef CFG_SUPPORT_TDLS_11BE
+#define CFG_SUPPORT_TDLS_11BE	0
+#endif
+#ifndef CFG_SUPPORT_TDLS_P2P
+#define CFG_SUPPORT_TDLS_P2P	0
+#endif
+#ifndef CFG_SUPPORT_TDLS_P2P_OFFCHANNEL
+#define CFG_SUPPORT_TDLS_P2P_OFFCHANNEL	0
+#endif
+#ifndef CFG_SUPPORT_TDLS_P2P_AUTO
+#define CFG_SUPPORT_TDLS_P2P_AUTO	0
+#endif
+#ifndef CFG_SUPPORT_TDLS_ADJUST_BW
+#define CFG_SUPPORT_TDLS_ADJUST_BW	0
+#endif
+#ifndef CFG_SUPPORT_TDLS_LOG
+#define CFG_SUPPORT_TDLS_LOG	0
+#endif
+
+/*------------------------------------------------------------------------------
+ * Flag of Wifi Standalone Log Support.
+ * 1: Enable. Could be supported only if (CFG_MTK_ANDROID_WMT == 1).
+ * 0: Disable.
+ *------------------------------------------------------------------------------
+ */
+#if CFG_MTK_ANDROID_WMT
+#define CFG_SUPPORT_SA_LOG 0
+#else
+#define CFG_SUPPORT_SA_LOG 0
+#endif
+
+/*------------------------------------------------------------------------------
+ * Stat CMD will have different format due to different algorithm support
+ *------------------------------------------------------------------------------
+ */
+#if (defined(MT6632) || defined(MT7668))
+#define CFG_SUPPORT_RA_GEN			0
+#define CFG_SUPPORT_TXPOWER_INFO		0
+#else
+#define CFG_SUPPORT_RA_GEN			1
+#define CFG_SUPPORT_TXPOWER_INFO		1
+#endif
+
+/*------------------------------------------------------------------------------
+ * Flags of gl_rst.h
+ *------------------------------------------------------------------------------
+ */
+#if defined(_HIF_SDIO)
+/* #ifdef CONFIG_X86 */
+/*Kernel-3.10-ARM did not provide X86_FLAG & HIF shouldn't bind platform*/
+#if (CFG_MTK_ANDROID_WMT)
+#define MTK_WCN_HIF_SDIO		1
+#else
+#define MTK_WCN_HIF_SDIO		0
+#endif
+#else
+#define MTK_WCN_HIF_SDIO		0
+#endif
+
+#if defined(_HIF_AXI)
+#ifdef LINUX
+#ifdef CONFIG_X86
+#define MTK_WCN_HIF_AXI			0
+#else
+#define MTK_WCN_HIF_AXI			1
+#endif
+#else
+#define MTK_WCN_HIF_AXI			0
+#endif
+#else
+#define MTK_WCN_HIF_AXI			0
+#endif
+
+#if defined(_HIF_PCIE)
+#if IS_MOBILE_SEGMENT
+#define MTK_WCN_HIF_PCIE		1
+#else
+#define MTK_WCN_HIF_PCIE		0
+#endif
+#else
+#define MTK_WCN_HIF_PCIE		0
+#endif
+
+#if (MTK_WCN_HIF_SDIO == 1) || (MTK_WCN_HIF_AXI == 1) || (MTK_WCN_HIF_PCIE == 1)
+#define CFG_WMT_RESET_API_SUPPORT   1
+#else
+#define CFG_WMT_RESET_API_SUPPORT   0
+#endif
 
 /*******************************************************************************
  *                             D A T A   T Y P E S
@@ -2347,19 +2501,6 @@
  *                           P R I V A T E   D A T A
  *******************************************************************************
  */
-
-/*******************************************************************************
- *                                 M A C R O S
- *******************************************************************************
- */
-#define WM_RAM_TYPE_MOBILE			0
-#define WM_RAM_TYPE_CE				1
-
-#define IS_MOBILE_SEGMENT \
-	(CONFIG_WM_RAM_TYPE == WM_RAM_TYPE_MOBILE)
-
-#define IS_CE_SEGMENT \
-	(CONFIG_WM_RAM_TYPE == WM_RAM_TYPE_CE)
 
 /*******************************************************************************
  *                   F U N C T I O N   D E C L A R A T I O N S

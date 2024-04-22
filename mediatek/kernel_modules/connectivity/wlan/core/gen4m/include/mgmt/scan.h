@@ -187,7 +187,7 @@
 
 #define SCN_CTRL_DEFAULT_SCAN_CTRL		SCN_CTRL_IGNORE_AIS_FIX_CHANNEL
 
-#define SCN_SCAN_DONE_PRINT_BUFFER_LENGTH	350
+#define SCN_SCAN_DONE_PRINT_BUFFER_LENGTH	400
 /*******************************************************************************
  *                             D A T A   T Y P E S
  *******************************************************************************
@@ -842,7 +842,7 @@ extern const char aucScanLogPrefix[][SCAN_LOG_PREFIX_MAX_LEN];
 #define IS_6G_PSC_CHANNEL(_ch) \
 	(((_ch - 5) % 16) == 0)
 #define IS_6G_OP_CLASS(_opClass) \
-	((_opClass >= 131) && (_opClass <= 135))
+	((_opClass >= 131) && (_opClass <= 137))
 
 /*******************************************************************************
  *                   F U N C T I O N   D E C L A R A T I O N S

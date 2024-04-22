@@ -144,9 +144,12 @@ struct HIF_MEM_OPS {
 			      uint32_t u4Num, uint32_t u4Idx);
 	void (*allocTxDataBuf)(struct MSDU_TOKEN_ENTRY *prToken,
 			       uint32_t u4Idx);
-	void *(*allocRxBuf)(struct GL_HIF_INFO *prHifInfo,
-			    struct RTMP_DMABUF *prDmaBuf,
-			    uint32_t u4Num, uint32_t u4Idx);
+	void *(*allocRxEvtBuf)(struct GL_HIF_INFO *prHifInfo,
+			       struct RTMP_DMABUF *prDmaBuf,
+			       uint32_t u4Num, uint32_t u4Idx);
+	void *(*allocRxDataBuf)(struct GL_HIF_INFO *prHifInfo,
+				struct RTMP_DMABUF *prDmaBuf,
+				uint32_t u4Num, uint32_t u4Idx);
 	void *(*allocRuntimeMem)(uint32_t u4SrcLen);
 	bool (*copyCmd)(struct GL_HIF_INFO *prHifInfo,
 			struct RTMP_DMACB *prTxCell, void *pucBuf,
@@ -208,6 +211,7 @@ enum pcie_aspm_state {
 enum pcie_vote_user {
 	PCIE_VOTE_USER_DRVOWN = 0,
 	PCIE_VOTE_USER_LOG_RESET,
+	PCIE_VOTE_USER_MDDP,
 	PCIE_VOTE_USER_NUM
 };
 
@@ -635,6 +639,7 @@ extern int mtk_msi_unmask_to_other_mcu(
 extern int mtk_pcie_hw_control_vote(
 	int port, bool hw_mode_en, u8 who) __attribute__((weak));
 extern u32 mtk_pcie_dump_link_info(int port) __attribute__((weak));
+extern u32 mtk_pcie_disable_data_trans(int port) __attribute__((weak));
 #if CFG_SUPPORT_PCIE_GEN_SWITCH
 int mtk_pcie_speed(struct pci_dev *dev, int speed);
 int mtk_pcie_retrain(struct pci_dev *dev);

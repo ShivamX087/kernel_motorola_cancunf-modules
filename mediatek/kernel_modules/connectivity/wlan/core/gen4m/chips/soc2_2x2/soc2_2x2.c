@@ -347,7 +347,6 @@ struct CHIP_DBG_OPS soc2_2x2_debug_ops = {
 #ifdef CFG_SUPPORT_LINK_QUALITY_MONITOR
 	.get_rx_rate_info = connac_get_rx_rate_info,
 #endif
-	.dumpPhyInfo = haldumpPhyInfo
 };
 
 struct mt66xx_chip_info mt66xx_chip_info_soc2_2x2 = {
@@ -402,7 +401,10 @@ struct mt66xx_chip_info mt66xx_chip_info_soc2_2x2 = {
 
 	.calDebugCmd = soc2_2x2wlanCalDebugCmd,
 #if CFG_SUPPORT_MDDP_AOR
-	.isSupportMddpAOR = true,
+	.isSupportMddpAOR = TRUE,
+#endif
+#if CFG_SUPPORT_MDDP_SHM
+	.isSupportMddpSHM = TRUE,
 #endif
 #if CFG_MTK_ANDROID_WMT
 	.rEmiInfo = {

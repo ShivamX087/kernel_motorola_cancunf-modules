@@ -519,6 +519,13 @@ struct BSS_INFO {
 	u_int8_t fgTdlsIsProhibited;
 	u_int8_t fgTdlsIsChSwProhibited;
 #endif
+#if CFG_SUPPORT_TDLS_P2P_AUTO
+	struct sta_tdls_info *prTdlsHash[STA_TDLS_HASH_SIZE + 1];
+	uint64_t ulLastUpdate;
+	int32_t i4TdlsLastRx;
+	int32_t i4TdlsLastTx;
+	struct TIMER rTdlsStateTimer;
+#endif
 
 	/*link layer statistics */
 	struct WIFI_WMM_AC_STAT arLinkStatistics[WMM_AC_INDEX_NUM];
@@ -585,7 +592,7 @@ struct BSS_INFO {
 
 	u_int8_t fgEnableH2E;
 
-#if CFG_MSCS_SUPPORT
+#if CFG_FAST_PATH_SUPPORT
 	struct FAST_PATH_INFO rFastPathInfo;
 #endif
 
@@ -860,6 +867,7 @@ struct WIFI_VAR {
 	uint8_t ucRxCtrlToMutiBss;
 	uint8_t ucStaHePpRx;
 	uint8_t ucHeDynamicSMPS;
+	uint8_t ucHeHTC;
 #endif
 #if (CFG_SUPPORT_TWT == 1)
 	uint8_t ucTWTRequester;
@@ -954,6 +962,8 @@ struct WIFI_VAR {
 
 	uint8_t ucRxMaxMpduLen;
 	uint8_t ucRxQuotaInfoEn;
+	uint32_t u4HtTxMaxAmsduInAmpduLen;
+	uint32_t u4VhtTxMaxAmsduInAmpduLen;
 	uint32_t u4TxMaxAmsduInAmpduLen;
 
 	uint8_t ucTxBaSize;
@@ -1111,6 +1121,7 @@ struct WIFI_VAR {
 	uint32_t u4PerfMonUsedTh;
 
 	u_int8_t fgTdlsBufferSTASleep; /* Support TDLS 5.5.4.2 optional case */
+	u_int8_t fgTdlsDisable;
 	u_int8_t fgChipResetRecover;
 	enum PARAM_POWER_MODE ePowerMode;
 
@@ -1155,6 +1166,7 @@ struct WIFI_VAR {
 			uint32_t fgDumpRxD: 1;        /* 0x10 */
 			uint32_t fgDumpRxDmad: 1;     /* 0x20 */
 			uint32_t fgDumpRxDsegment: 1; /* 0x40 */
+			uint32_t fgDumpRxEvt: 1;      /* 0x80 */
 		};
 	};
 	uint32_t u4BaShortMissTimeoutMs;
@@ -1178,6 +1190,7 @@ struct WIFI_VAR {
 	uint8_t fgEnDefaultIotApRule;
 #endif
 	uint8_t ucMsduReportTimeout;
+	uint8_t ucMsduReportTimeoutSerTime;
 
 #if CFG_SUPPORT_DATA_STALL
 	uint32_t u4PerHighThreshole;
@@ -1220,6 +1233,7 @@ struct WIFI_VAR {
 	uint32_t uArpMonitorNumber;
 	uint32_t uArpMonitorRxPktNum;
 	uint8_t uArpMonitorCriticalThres;
+	uint8_t ucArpMonitorUseRule; /* 0:old rule, 1:new rule */
 #endif /* ARP_MONITER_ENABLE */
 #if CFG_RFB_TRACK
 	u_int8_t fgRfbTrackEn;
@@ -1256,6 +1270,9 @@ struct WIFI_VAR {
 	uint8_t ucDfsRegion;
 	uint32_t u4ByPassCacTime;
 	uint32_t u4CC2Region;
+#if CFG_SUPPORT_TDLS_P2P_AUTO
+	uint32_t u4TdlsP2pAuto;
+#endif
 	uint32_t u4ApChnlHoldTime;
 	uint32_t u4P2pChnlHoldTime;
 	uint32_t u4ProbeRspRetryLimit;
@@ -1275,7 +1292,6 @@ struct WIFI_VAR {
 	unsigned char fgEnableNDPE;
 	uint8_t ucDftNdlQosQuotaVal;    /* Unit: NAN slot */
 	uint16_t u2DftNdlQosLatencyVal; /* Unit: NAN slot */
-	uint8_t ucNanBandwidth;
 	uint8_t fgEnNanVHT;
 	uint8_t ucNanFtmBw;
 	uint8_t ucNanDiscBcnInterval;
@@ -1283,6 +1299,7 @@ struct WIFI_VAR {
 	unsigned char fgNoPmf;
 	uint8_t ucNan2gBandwidth;
 	uint8_t ucNan5gBandwidth;
+	uint8_t ucNdlFlowCtrlVer;
 #endif
 
 #if CFG_SUPPORT_TPENHANCE_MODE
@@ -1312,6 +1329,9 @@ struct WIFI_VAR {
 	uint8_t ucApfEnable;
 #endif
 
+	/* rx rate filter */
+	uint32_t u4RxRateProtoFilterMask;
+
 #if CFG_SUPPORT_BAR_DELAY_INDICATION
 	u_int8_t fgBARDelayIndicationEn;
 #endif /* CFG_SUPPORT_BAR_DELAY_INDICATION */
@@ -1320,6 +1340,9 @@ struct WIFI_VAR {
 #if CFG_SUPPORT_LIMITED_PKT_PID
 	uint32_t u4PktPIDTimeout;
 #endif /* CFG_SUPPORT_LIMITED_PKT_PID */
+#if CFG_SUPPORT_ICS_TIMESYNC
+	uint32_t u4IcsTimeSyncCnt;
+#endif /* CFG_SUPPORT_ICS_TIMESYNC */
 #if (CFG_SUPPORT_WIFI_6G == 1)
 	/* Only scan all 6g channels, including PSC and non-PSC */
 	u_int8_t fgEnOnlyScan6g;
@@ -1430,6 +1453,9 @@ struct WIFI_VAR {
 	uint32_t u4PagePoolMinCnt;
 	uint32_t u4PagePoolMaxCnt;
 #endif
+
+	/* 0:BW20, 1:BW40, 2:BW80, 3:BW160 4:BW8080, 5: BW320 */
+	uint32_t u4PhyMaxBandwidth;
 };
 
 /* cnm_timer module */
@@ -1784,6 +1810,8 @@ struct ADAPTER {
 	u_int8_t fgAllMulicastFilter;	/* mDNS filter used by OS */
 
 	struct BSS_INFO *aprBssInfo[MAX_BSSID_NUM + 1];
+	struct BSS_INFO *aprSapBssInfo[KAL_P2P_NUM];
+
 	uint8_t ucHwBssIdNum;
 	uint8_t ucWmmSetNum;
 	uint8_t ucWtblEntryNum;
@@ -2000,6 +2028,10 @@ struct ADAPTER {
 #endif
 
 	struct PARAM_LINK_SPEED_EX rLinkQuality;
+
+#if (CFG_SUPPORT_STATS_ONE_CMD == 1)
+	OS_SYSTIME rAllStatsUpdateTime;
+#endif
 
 	/* WIFI_VAR_T */
 	struct WIFI_VAR rWifiVar;
@@ -2273,7 +2305,11 @@ struct ADAPTER {
 	uint32_t u4LastLinkQuality;
 	uint32_t u4LinkQualityCounter;
 	struct WIFI_LINK_QUALITY_INFO rLinkQualityInfo;
+#if (CFG_SUPPORT_STATS_ONE_CMD == 1)
+	struct PARAM_GET_STA_STATISTICS rQueryStaStatistics[MAX_BSSID_NUM];
+#else
 	struct PARAM_GET_STA_STATISTICS rQueryStaStatistics;
+#endif
 	struct PARAM_802_11_STATISTICS_STRUCT rStat;
 	uint32_t u4BufLen;
 #endif /* CFG_SUPPORT_LINK_QUALITY_MONITOR */
@@ -2295,8 +2331,6 @@ struct ADAPTER {
 #if CFG_SUPPORT_BIGDATA_PIP
 	OS_SYSTIME tmDataPipReportinterval;
 #endif
-
-	int8_t cArpNoResponseIdx;
 
 	u_int8_t fgEnDbgPowerMode;
 
@@ -2401,9 +2435,10 @@ struct ADAPTER {
 	uint32_t u4TdlsLinkCount;
 #endif /* CFG_SUPPORT_TDLS */
 
-#if CFG_MSCS_SUPPORT
+#if CFG_FAST_PATH_SUPPORT
 	struct MSCS_CAP_FAST_PATH rFastPathCap;
 #endif
+	uint8_t ucEnVendorSpecifiedRpt;
 
 #if CFG_SUPPORT_MLR
 	uint8_t ucMlrIsSupport;

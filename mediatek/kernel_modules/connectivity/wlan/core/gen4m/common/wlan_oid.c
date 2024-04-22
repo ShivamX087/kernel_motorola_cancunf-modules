@@ -859,7 +859,11 @@ wlanoidSetBssidListScanAdv(struct ADAPTER *prAdapter,
 	} else
 #endif
 	{
-		if (prAdapter->fgEnOnlineScan == TRUE) {
+		if (p2pFuncIsCsaBlockScan(prAdapter)) {
+			DBGLOG(OID, WARN,
+		       "Not to do scan during SAP CSA!!\n");
+			return WLAN_STATUS_FAILURE;
+		} else if (prAdapter->fgEnOnlineScan == TRUE) {
 			aisFsmScanRequestAdv(prAdapter, prScanRequest);
 		} else if (kalGetMediaStateIndicated(prAdapter->prGlueInfo,
 			ucBssIndex)
@@ -4536,7 +4540,6 @@ wlanoidQueryLinkSpeed(struct ADAPTER *prAdapter,
 			void *pvQueryBuffer, uint32_t u4QueryBufferLen,
 			uint32_t *pu4QueryInfoLen)
 {
-	struct PERF_MONITOR *perf = &prAdapter->rPerMonitor;
 	uint8_t ucBssIndex;
 	OS_SYSTIME rUpdateDeltaTime;
 	struct PARAM_LINK_SPEED_EX *pu4LinkSpeed;
@@ -4561,10 +4564,9 @@ wlanoidQueryLinkSpeed(struct ADAPTER *prAdapter,
 		return WLAN_STATUS_INVALID_DATA;
 	prLq = &prAdapter->rLinkQuality.rLq[ucBssIndex];
 	rUpdateDeltaTime = kalGetTimeTick() - prLq->rLinkRateUpdateTime;
-	if (perf->fgIdle ||
-		(IS_BSS_INDEX_AIS(prAdapter, ucBssIndex) &&
+	if (IS_BSS_INDEX_AIS(prAdapter, ucBssIndex) &&
 		prLq->fgIsLinkRateValid == TRUE &&
-		rUpdateDeltaTime <= CFG_LQ_MONITOR_FREQUENCY)
+		rUpdateDeltaTime <= CFG_LQ_MONITOR_FREQUENCY
 	) {
 		pu4LinkSpeed = (struct PARAM_LINK_SPEED_EX *) (pvQueryBuffer);
 		pu4LinkSpeed->rLq[ucBssIndex].cRssi = prLq->cRssi;
@@ -4636,6 +4638,33 @@ wlanoidQueryMaxLinkSpeed(struct ADAPTER *prAdapter,
 	return rv;
 }
 #endif /* CFG_REPORT_MAX_TX_RATE */
+
+#if (CFG_SUPPORT_STATS_ONE_CMD == 1)
+uint32_t
+wlanoidQueryStatsOneCmd(struct ADAPTER *prAdapter,
+			void *pvQueryBuffer, uint32_t u4QueryBufferLen,
+			uint32_t *pu4QueryInfoLen)
+{
+	uint32_t rResult = WLAN_STATUS_FAILURE;
+
+	DEBUGFUNC("wlanoidQueryStatsOneCmd");
+
+	ASSERT(prAdapter);
+	ASSERT(pu4QueryInfoLen);
+	if (u4QueryBufferLen)
+		ASSERT(pvQueryBuffer);
+
+	if (prAdapter->fgIsEnableLpdvt)
+		return WLAN_STATUS_NOT_SUPPORTED;
+
+	rResult = wlanQueryStatsOneCmd(prAdapter,
+				pvQueryBuffer,
+				u4QueryBufferLen,
+				pu4QueryInfoLen,
+				TRUE);
+	return rResult;
+}
+#endif
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -5611,15 +5640,14 @@ wlanoidUninitAisFsm(struct ADAPTER *prAdapter,
 		     uint32_t u4SetBufferLen,
 		     uint32_t *pu4SetInfoLen)
 {
-	struct AIS_FSM_INFO *prAisFsmInfo;
-	uint8_t ucBssIndex;
+	uint8_t ucAisIndex;
 
 	ASSERT(prAdapter);
+	ASSERT(pvSetBuffer);
 
-	ucBssIndex = GET_IOCTL_BSSIDX(prAdapter);
-	prAisFsmInfo = aisGetAisFsmInfo(prAdapter, ucBssIndex);
+	ucAisIndex = *((uint8_t *)pvSetBuffer);
 
-	aisFsmUninit(prAdapter, AIS_INDEX(prAdapter, ucBssIndex));
+	aisFsmUninit(prAdapter, ucAisIndex);
 
 	return WLAN_STATUS_SUCCESS;
 }
@@ -8319,6 +8347,7 @@ uint32_t
 wlanoidRssiMonitor(struct ADAPTER *prAdapter,
 		   void *pvQueryBuffer, uint32_t u4QueryBufferLen,
 		   uint32_t *pu4QueryInfoLen) {
+	struct AIS_FSM_INFO *prAisFsmInfo;
 	struct PARAM_RSSI_MONITOR_T rRssi;
 	int8_t orig_max_rssi_value;
 	int8_t orig_min_rssi_value;
@@ -8332,6 +8361,7 @@ wlanoidRssiMonitor(struct ADAPTER *prAdapter,
 		ASSERT(pvQueryBuffer);
 
 	*pu4QueryInfoLen = sizeof(struct PARAM_RSSI_MONITOR_T);
+	prAisFsmInfo = aisGetAisFsmInfo(prAdapter, ucBssIndex);
 
 	/* Check for query buffer length */
 	if (u4QueryBufferLen < *pu4QueryInfoLen) {
@@ -8348,8 +8378,7 @@ wlanoidRssiMonitor(struct ADAPTER *prAdapter,
 	kalMemCopy(&rRssi, pvQueryBuffer,
 		   sizeof(struct PARAM_RSSI_MONITOR_T));
 
-	if (kalGetMediaStateIndicated(prAdapter->prGlueInfo,
-		ucBssIndex) ==
+	if (kalGetMediaStateIndicated(prAdapter->prGlueInfo, ucBssIndex) ==
 	    MEDIA_STATE_DISCONNECTED) {
 		DBGLOG(OID, TRACE,
 			"Set RSSI monitor when disconnected, enable=%d\n",
@@ -8363,6 +8392,8 @@ wlanoidRssiMonitor(struct ADAPTER *prAdapter,
 		rRssi.max_rssi_value = 0;
 		rRssi.min_rssi_value = 0;
 	}
+	kalMemCopy(&prAisFsmInfo->rRSSIMonitor, &rRssi,
+		   sizeof(struct PARAM_RSSI_MONITOR_T));
 
 	DBGLOG(OID, TRACE,
 	       "enable=%d, max_rssi_value=%d, min_rssi_value=%d, orig_max_rssi_value=%d, orig_min_rssi_value=%d\n",
@@ -11723,6 +11754,13 @@ wlanoidSetWiFiWmmPsTest(struct ADAPTER *prAdapter,
 	else
 		NIC_PM_WMM_PS_DISABLE_UC_TRIG(prAdapter, FALSE);
 #endif
+
+	DBGLOG(INIT, INFO, "BSS[%d] DeAC=%x TrigAC=%x Once=%d DisUcTrig=%d\n",
+		rSetWmmPsTestParam.ucBssIndex,
+		prPmProfSetupInfo->ucBmpDeliveryAC,
+		prPmProfSetupInfo->ucBmpTriggerAC,
+		rSetWmmPsTestParam.ucIsEnterPsAtOnce,
+		rSetWmmPsTestParam.ucIsDisableUcTrigger);
 
 	rStatus = wlanSendSetQueryCmd(prAdapter,
 				      CMD_ID_SET_WMM_PS_TEST_PARMS,
@@ -15544,7 +15582,7 @@ wlanoidDisableTdlsPs(struct ADAPTER *prAdapter,
 		return WLAN_STATUS_INVALID_DATA;
 
 	kalMemSet(&rTdlsPs, 0, sizeof(struct CMD_TDLS_PS_T));
-	rTdlsPs.ucIsEnablePs = *(uint8_t *)pvSetBuffer - '0';
+	rTdlsPs.ucIsEnablePs = *(uint8_t *)pvSetBuffer;
 	DBGLOG(OID, INFO, "enable tdls ps %d\n",
 	       rTdlsPs.ucIsEnablePs);
 	return wlanSendSetQueryCmd(prAdapter,
@@ -16086,15 +16124,9 @@ uint32_t wlanoidUpdateFtIes(struct ADAPTER *prAdapter, void *pvSetBuffer,
 	}
 	prFtContinueMsg->rMsgHdr.eMsgId = MID_OID_SAA_FSM_CONTINUE;
 	prFtContinueMsg->prStaRec = prStaRec;
-	/* ToDo: for Resource Request Protocol, we need to check if RIC request
-	** is included.
-	*/
-	if (prFtIes->prMDIE && (prFtIes->prMDIE->ucBitMap & BIT(1)))
-		prFtContinueMsg->fgFTRicRequest = TRUE;
-	else
-		prFtContinueMsg->fgFTRicRequest = FALSE;
-	DBGLOG(OID, INFO, "FT: continue to do auth/assoc, Ft Request %d\n",
-	       prFtContinueMsg->fgFTRicRequest);
+	/* We don't support resource request protocol */
+	prFtContinueMsg->fgFTRicRequest = FALSE;
+	DBGLOG(OID, INFO, "FT: continue to do auth/assoc\n");
 	mboxSendMsg(prAdapter, MBOX_ID_0, (struct MSG_HDR *)prFtContinueMsg,
 		    MSG_SEND_METHOD_BUF);
 	return WLAN_STATUS_SUCCESS;
@@ -16849,6 +16881,7 @@ uint32_t wlanoidSetAmsduSize(struct ADAPTER *prAdapter,
 {
 	struct mt66xx_chip_info *prChipInfo = NULL;
 	struct WIFI_VAR *prWifiVar = NULL;
+	uint32_t u4TxMaxAmsduInAmpduLen;
 
 	ASSERT(prAdapter);
 	if (u4SetBufferLen)
@@ -16857,7 +16890,16 @@ uint32_t wlanoidSetAmsduSize(struct ADAPTER *prAdapter,
 
 	prChipInfo = prAdapter->chip_info;
 	prWifiVar = &prAdapter->rWifiVar;
-	prWifiVar->u4TxMaxAmsduInAmpduLen = *((uint32_t *)pvSetBuffer);
+	u4TxMaxAmsduInAmpduLen = *((uint32_t *)pvSetBuffer);
+	if (u4TxMaxAmsduInAmpduLen > WLAN_TX_MAX_AMSDU_IN_AMPDU_LEN) {
+		DBGLOG(OID, WARN, "AMSDU max Size exceeds limit %d!",
+		       WLAN_TX_MAX_AMSDU_IN_AMPDU_LEN);
+		u4TxMaxAmsduInAmpduLen = WLAN_TX_MAX_AMSDU_IN_AMPDU_LEN;
+	}
+	prWifiVar->u4HtTxMaxAmsduInAmpduLen = u4TxMaxAmsduInAmpduLen;
+	prWifiVar->u4VhtTxMaxAmsduInAmpduLen = u4TxMaxAmsduInAmpduLen;
+	prWifiVar->u4TxMaxAmsduInAmpduLen = u4TxMaxAmsduInAmpduLen;
+
 	DBGLOG(OID, INFO, "Set SW AMSDU max Size: %d\n",
 	   prWifiVar->u4TxMaxAmsduInAmpduLen);
 	return 0;
@@ -17905,6 +17947,28 @@ uint32_t wlanoidSendBTMRequest(struct ADAPTER *prAdapter,
 	return WLAN_STATUS_SUCCESS;
 }
 #endif /* CFG_AP_80211V_SUPPORT */
+
+uint32_t wlanoidEnableVendorSpecifiedRpt(struct ADAPTER *prAdapter,
+				    void *pvSetBuffer, uint32_t u4SetBufferLen,
+				    uint32_t *pu4SetInfoLen)
+{
+	uint8_t ucBssIndex = 0;
+	uint8_t ucEnable = FALSE;
+	uint32_t u4Ret = 0;
+
+	ucBssIndex = GET_IOCTL_BSSIDX(prAdapter);
+
+	if (pvSetBuffer) {
+		u4Ret = kalkStrtou8(pvSetBuffer, 0, &ucEnable);
+		if (u4Ret)
+			DBGLOG(OID, WARN, "parse failed:%d\n", u4Ret);
+	}
+	prAdapter->ucEnVendorSpecifiedRpt = ucEnable;
+	DBGLOG(OID, INFO, "%s vendor specified packet to host\n",
+		ucEnable ? "Enable" : "Disable");
+
+	return WLAN_STATUS_SUCCESS;
+}
 
 /*----------------------------------------------------------------------------*/
 /*!

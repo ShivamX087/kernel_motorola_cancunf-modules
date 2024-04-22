@@ -95,7 +95,7 @@ uint32_t ehtRlmCalculateCapIELen(
 			u4OverallLen += sizeof(
 				struct EHT_SUPPORTED_MCS_BW80_160_320_FIELD);
 		}
-		if (ucMaxBw >= MAX_BW_320MHZ) {
+		if (ucMaxBw >= MAX_BW_320_1MHZ) {
 			u4OverallLen += sizeof(
 				struct EHT_SUPPORTED_MCS_BW80_160_320_FIELD);
 		}
@@ -181,7 +181,8 @@ void ehtRlmFillCapIE(
 	uint32_t phy_cap_2 = 0;
 	uint32_t u4OverallLen = OFFSET_OF(struct IE_EHT_CAP, aucVarInfo[0]);
 	uint8_t eht_mcs15_mru = EHT_MCS15_MRU_106_or_52_w_26_tone;
-	uint8_t eht_bw = 0, ucSupportedNss = 0;
+	uint8_t ucSupportedNss = 0;
+	int8_t eht_bw = 0;
 
 	ASSERT(prAdapter);
 	ASSERT(prBssInfo);
@@ -214,7 +215,7 @@ void ehtRlmFillCapIE(
 
 #if (CFG_SUPPORT_WIFI_6G == 1)
 	if (prBssInfo->eBand == BAND_6G) {
-		if (eht_bw >= MAX_BW_320MHZ)
+		if (eht_bw >= MAX_BW_320_1MHZ)
 			phy_cap_1 |= DOT11BE_PHY_CAP_320M_6G;
 	}
 #endif
@@ -234,8 +235,7 @@ void ehtRlmFillCapIE(
 		/* phy_cap_2 |= DOT11BE_PHY_CAP_PPE_THRLD_PRESENT; */
 	}
 
-	if (eht_bw >= MAX_BW_40MHZ) {
-		eht_mcs15_mru |= EHT_MCS15_MRU_484_w_242_tone_80M;
+	if (eht_bw >= MAX_BW_20MHZ) {
 		/* set 3 to support AP NSS 4 */
 		SET_DOT11BE_PHY_CAP_BFEE_SS_LE_EQ_80M(phy_cap_1,
 			prWifiVar->ucEhtBfeeSSLeEq80m);
@@ -244,6 +244,10 @@ void ehtRlmFillCapIE(
 			SET_DOT11BE_PHY_CAP_SOUND_DIM_NUM_LE_EQ_80M(
 				phy_cap_1, (uint32_t)(ucSupportedNss - 1));
 	}
+
+	if (eht_bw >= MAX_BW_80MHZ)
+		eht_mcs15_mru |= EHT_MCS15_MRU_484_w_242_tone_80M;
+
 	if (eht_bw >= MAX_BW_160MHZ) {
 		eht_mcs15_mru |= EHT_MCS15_MRU_996_to_242_tone_160M;
 		/* set 3 to support AP NSS 4 */
@@ -254,7 +258,7 @@ void ehtRlmFillCapIE(
 			SET_DOT11BE_PHY_CAP_SOUND_DIM_NUM_160M(
 				phy_cap_1, (uint32_t)(ucSupportedNss - 1));
 	}
-	if (eht_bw >= MAX_BW_320MHZ) {
+	if (eht_bw >= MAX_BW_320_1MHZ) {
 		eht_mcs15_mru |= EHT_MCS15_MRU_3x996_tone_320M;
 		/* set 3 to support AP NSS 4 */
 		SET_DOT11BE_PHY_CAP_BFEE_320M(phy_cap_1,
@@ -364,7 +368,7 @@ void ehtRlmFillCapIE(
 			u4OverallLen += sizeof(
 				struct EHT_SUPPORTED_MCS_BW80_160_320_FIELD);
 		}
-		if (eht_bw >= MAX_BW_320MHZ) {
+		if (eht_bw >= MAX_BW_320_1MHZ) {
 			prEhtSupportedBw80McsSet =
 				(((uint8_t *) prEhtCap) + u4OverallLen);
 			ehtRlmFillBW80MCSMap(
@@ -471,7 +475,8 @@ uint8_t ehtRlmGetEhtOpBwByBssOpBw(uint8_t ucBssOpBw)
 		ucEhtOpBw = EHT_MAX_BW_160;
 		break;
 
-	case MAX_BW_320MHZ:
+	case MAX_BW_320_1MHZ:
+	case MAX_BW_320_2MHZ:
 		ucEhtOpBw = EHT_MAX_BW_320;
 		break;
 
@@ -721,7 +726,7 @@ void ehtRlmRecOperation(
 		prBssInfo->fgIsEhtOpPresent = TRUE;
 		prEhtOpInfo = (struct EHT_OP_INFO *) prEhtOp->aucVarInfo;
 		prBssInfo->ucVhtChannelWidth =
-			ehtRlmGetVhtOpBwByEhtOpBw(prEhtOpInfo->ucControl);
+			ehtRlmGetVhtOpBwByEhtOpBw(prEhtOpInfo);
 		prBssInfo->ucVhtChannelFrequencyS1 = nicGetS1(
 			prBssInfo->eBand, prBssInfo->ucPrimaryChannel,
 			prBssInfo->ucVhtChannelWidth);
@@ -730,7 +735,7 @@ void ehtRlmRecOperation(
 		prBssInfo->ucEhtCcfs0 = prEhtOpInfo->ucCCFS0;
 		prBssInfo->ucEhtCcfs1 = prEhtOpInfo->ucCCFS1;
 
-		DBGLOG(RLM, INFO,
+		DBGLOG(RLM, TRACE,
 			"EHT channel width: %d, s1 %d and s2 %d in IE -> s1 %d and s2 %d in driver\n",
 			prBssInfo->ucVhtChannelWidth,
 			prEhtOpInfo->ucCCFS0,
@@ -795,10 +800,13 @@ void ehtRlmInit(
  *
  */
 /*----------------------------------------------------------------------------*/
-uint8_t ehtRlmGetVhtOpBwByEhtOpBw(uint8_t ucBssOpBw)
+
+uint8_t ehtRlmGetVhtOpBwByEhtOpBw(struct EHT_OP_INFO *op)
 {
 	uint8_t ucVhtOpBw =
 		VHT_OP_CHANNEL_WIDTH_80; /*VHT default should support BW 80*/
+	uint8_t ucBssOpBw = op->ucControl & BITS(0, 2);
+	uint8_t ucS1 = op->ucCCFS1;
 
 	switch (ucBssOpBw) {
 	case EHT_MAX_BW_20:
@@ -815,12 +823,10 @@ uint8_t ehtRlmGetVhtOpBwByEhtOpBw(uint8_t ucBssOpBw)
 		break;
 
 	case EHT_MAX_BW_320:
-		ucVhtOpBw = VHT_OP_CHANNEL_WIDTH_320;
+		ucVhtOpBw = rlmGetVhtOpBw320ByS1(ucS1);
 		break;
-
 	default:
-		DBGLOG(RLM, WARN, "%s: unexpected Bss OP BW: %d\n", __func__,
-		       ucBssOpBw);
+		DBGLOG(RLM, WARN, "unexpected Bss OP BW: %d\n", ucBssOpBw);
 		break;
 	}
 

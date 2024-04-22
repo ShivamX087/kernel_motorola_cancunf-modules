@@ -95,7 +95,9 @@
 #if ((CFG_SUPPORT_ICS == 1) || (CFG_SUPPORT_PHY_ICS == 1))
 #include "ics.h"
 #endif
-
+#if CFG_SUPPORT_SA_LOG
+#include "gl_sa_log.h"
+#endif
 #if CFG_POWER_OFF_CTRL_SUPPORT
 #include <linux/reboot.h>
 #endif
@@ -112,6 +114,7 @@
 #if CFG_SUPPORT_CSI
 #include "gl_csi.h"
 #endif
+#include "conn_dbg.h"
 
 /*******************************************************************************
  *                              C O N S T A N T S
@@ -712,7 +715,22 @@ static struct ieee80211_rate mtk_rates[] = {
 static struct ieee80211_sband_iftype_data mtk_cap[] = {
 	{
 		.types_mask =
-			BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_AP),
+			BIT(NL80211_IFTYPE_AP),
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+		.he_cap = WLAN_HE_CAP_160_INFO,
+#else
+		.he_cap = WLAN_HE_CAP_INFO,
+#endif
+
+#if (CFG_SUPPORT_802_11BE == 1)
+#if (CFG_ADVANCED_80211_MLO == 1)
+		.eht_cap = WLAN_EHT_CAP_INFO,
+#endif
+#endif
+	},
+	{
+		.types_mask =
+			BIT(NL80211_IFTYPE_STATION),
 #if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
 		.he_cap = WLAN_HE_CAP_160_INFO,
 #else
@@ -764,7 +782,15 @@ static struct ieee80211_sband_iftype_data mtk_cap[] = {
 static struct ieee80211_sband_iftype_data mtk_cap_6g[] = {
 	{
 		.types_mask =
-			BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_AP),
+			BIT(NL80211_IFTYPE_AP),
+		.he_cap = WLAN_HE_CAP_INFO,
+#if KERNEL_VERSION(5, 8, 0) <= CFG80211_VERSION_CODE
+		.he_6ghz_capa = WLAN_HE_6G_CAP_INFO,
+#endif
+	},
+	{
+		.types_mask =
+			BIT(NL80211_IFTYPE_STATION),
 		.he_cap = WLAN_HE_CAP_INFO,
 #if KERNEL_VERSION(5, 8, 0) <= CFG80211_VERSION_CODE
 		.he_6ghz_capa = WLAN_HE_6G_CAP_INFO,
@@ -785,7 +811,7 @@ struct ieee80211_supported_band mtk_band_2ghz = {
 	.ht_cap = WLAN_HT_CAP,
 #if KERNEL_VERSION(4, 19, 0) <= CFG80211_VERSION_CODE
 #if (CFG_SUPPORT_802_11AX == 1)
-	.n_iftype_data = 1,
+	.n_iftype_data = ARRAY_SIZE(mtk_cap),
 	.iftype_data = mtk_cap,
 #endif
 #endif
@@ -806,7 +832,7 @@ struct ieee80211_supported_band mtk_band_5ghz = {
 #endif
 #if KERNEL_VERSION(4, 19, 0) <= CFG80211_VERSION_CODE
 #if (CFG_SUPPORT_802_11AX == 1)
-	.n_iftype_data = 1,
+	.n_iftype_data = ARRAY_SIZE(mtk_cap),
 	.iftype_data = mtk_cap,
 #endif
 #endif
@@ -822,7 +848,7 @@ struct ieee80211_supported_band mtk_band_6ghz = {
 	.n_bitrates = mtk_a_rates_size,
 #if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
 #if (CFG_SUPPORT_802_11AX == 1)
-	.n_iftype_data = 1,
+	.n_iftype_data = ARRAY_SIZE(mtk_cap_6g),
 	.iftype_data = mtk_cap_6g,
 #endif
 #endif
@@ -927,6 +953,10 @@ static struct cfg80211_ops mtk_cfg_ops = {
 	.add_station = mtk_cfg_add_station,
 	.tdls_oper = mtk_cfg_tdls_oper,
 	.tdls_mgmt = mtk_cfg_tdls_mgmt,
+#if CFG_SUPPORT_TDLS_OFFCHANNEL
+	.tdls_channel_switch = mtk_tdls_channel_switch,
+	.tdls_cancel_channel_switch = mtk_tdls_cancel_channel_switch,
+#endif
 #endif
 	.del_station = mtk_cfg_del_station,	/* AP/P2P use this function */
 	.scan = mtk_cfg_scan,
@@ -1173,7 +1203,8 @@ static const struct wiphy_vendor_command
 		.doit = mtk_cfg80211_vendor_cancel_rtt_config
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
 		,
-		.policy = VENDOR_CMD_RAW_DATA
+		.policy = nla_set_rtt_config_policy,
+		.maxattr = RTT_ATTRIBUTE_MAX
 #endif
 	},
 #endif /* CFG_SUPPORT_RTT */
@@ -1552,6 +1583,34 @@ static const struct wiphy_vendor_command
 		.policy = VENDOR_CMD_RAW_DATA
 #endif
 	},
+#if CFG_SUPPORT_P2P_LISTEN_OFFLOAD
+	{
+		{
+			.vendor_id = OUI_QCA,
+			.subcmd = QCA_NL80211_VENDOR_SUBCMD_P2P_LISTEN_OFFLOAD_START
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
+				| WIPHY_VENDOR_CMD_NEED_NETDEV
+				| WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = mtk_cfg80211_vendor_p2p_listen_offload_start
+		,
+		.policy = nla_p2p_listen_offload_policy,
+		.maxattr = QCA_WLAN_VENDOR_ATTR_P2P_LO_MAX
+	},
+	{
+		{
+			.vendor_id = OUI_QCA,
+			.subcmd = QCA_NL80211_VENDOR_SUBCMD_P2P_LISTEN_OFFLOAD_STOP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
+				| WIPHY_VENDOR_CMD_NEED_NETDEV
+				| WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = mtk_cfg80211_vendor_p2p_listen_offload_stop
+		,
+		.policy = nla_p2p_listen_offload_policy,
+		.maxattr = QCA_WLAN_VENDOR_ATTR_P2P_LO_MAX
+	},
+#endif /* CFG_SUPPORT_P2P_LISTEN_OFFLOAD */
 };
 
 static const struct nl80211_vendor_cmd_info
@@ -1661,6 +1720,10 @@ static const struct nl80211_vendor_cmd_info
 	[WIFI_EVENT_SUBCMD_CSI] {
 		.vendor_id = OUI_MTK,
 		.subcmd = MTK_SUBCMD_CSI
+	},
+	[WIFI_EVENT_P2P_LISTEN_OFFLOAD] = {
+		.vendor_id = OUI_QCA,
+		.subcmd = QCA_NL80211_VENDOR_SUBCMD_P2P_LISTEN_OFFLOAD_STOP
 	},
 };
 #endif
@@ -1784,6 +1847,75 @@ unsigned int _cfg80211_classify8021d(struct sk_buff *skb)
 	return dscp >> 5;
 }
 #endif
+
+/**
+ * Mark these frames as critical to be transmitted in high priority queuet.
+ * 1. TX Authentication related frames.
+ * 2. TX ARP when queue is stopped.
+ * 3. When monitored ARP TX is over threshold.
+ */
+static bool is_critical_packet(struct net_device *dev,
+	struct sk_buff *skb, u16 orig_queue_index)
+{
+#if CFG_CHANGE_CRITICAL_PACKET_PRIORITY
+	uint8_t *pucPkt;
+	uint16_t u2EtherType;
+	bool is_critical = false;
+
+	if (!skb)
+		return false;
+
+	pucPkt = skb->data;
+	u2EtherType = (pucPkt[ETH_TYPE_LEN_OFFSET] << 8)
+			| (pucPkt[ETH_TYPE_LEN_OFFSET + 1]);
+
+	switch (u2EtherType) {
+	case ETH_P_ARP:
+		if (__netif_subqueue_stopped(dev, orig_queue_index))
+			is_critical = true;
+#if ARP_MONITER_ENABLE
+		if (qmArpMonitorIsCritical())
+			is_critical = true;
+#endif
+		break;
+	case ETH_P_1X:
+	case ETH_P_PRE_1X:
+#if CFG_SUPPORT_WAPI
+	case ETH_WPI_1X:
+#endif
+		is_critical = true;
+		break;
+	default:
+		is_critical = false;
+		break;
+	}
+	return is_critical;
+#else
+	return false;
+#endif
+}
+
+static inline u16 mtk_wlan_ndev_select_queue(
+	struct net_device *dev,
+	struct sk_buff *skb)
+{
+	static u16 ieee8021d_to_queue[8] = { 1, 0, 0, 1, 2, 2, 3, 3 };
+	u16 queue_index = 0;
+
+	/* cfg80211_classify8021d returns 0~7 */
+#if KERNEL_VERSION(3, 14, 0) > CFG80211_VERSION_CODE
+	skb->priority = cfg80211_classify8021d(skb);
+#else
+	skb->priority = cfg80211_classify8021d(skb, NULL);
+#endif
+	queue_index = ieee8021d_to_queue[skb->priority];
+	if (is_critical_packet(dev, skb, queue_index)) {
+		skb->priority = WMM_UP_VO_INDEX;
+		queue_index = ieee8021d_to_queue[skb->priority];
+	}
+
+	return queue_index;
+}
 
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
 u16 wlanSelectQueue(struct net_device *dev,
@@ -3029,7 +3161,8 @@ static u_int8_t wlanIsAdjacentChnl(struct GL_P2P_INFO *prGlueP2pInfo,
 	case VHT_OP_CHANNEL_WIDTH_160:
 		u4BandWidth = 160;
 		break;
-	case VHT_OP_CHANNEL_WIDTH_320:
+	case VHT_OP_CHANNEL_WIDTH_320_1:
+	case VHT_OP_CHANNEL_WIDTH_320_2:
 		u4BandWidth = 320;
 		break;
 	default:
@@ -3427,6 +3560,9 @@ static void wlanCreateWirelessDevice(void)
 
 #if (CFG_SUPPORT_TDLS == 1)
 	TDLSEX_WIPHY_FLAGS_INIT(prWiphy->flags);
+#if CFG_SUPPORT_TDLS_OFFCHANNEL
+	prWiphy->features |= NL80211_FEATURE_TDLS_CHANNEL_SWITCH;
+#endif
 #endif /* CFG_SUPPORT_TDLS */
 	prWiphy->max_remain_on_channel_duration = 5000;
 	prWiphy->mgmt_stypes = mtk_cfg80211_ais_default_mgmt_stypes;
@@ -3704,6 +3840,8 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 	if (prWdev == NULL) {
 		DBGLOG(INIT, ERROR,
 		       "No wireless dev exist, abort power on\n");
+		conn_dbg_add_log(CONN_DBG_LOG_TYPE_HW_ERR,
+			"No wireless dev exist, abort power on\n");
 		return NULL;
 	}
 
@@ -3849,6 +3987,8 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 	SET_NETDEV_DEV(prDevHandler,
 			wiphy_dev(prWdev->wiphy));
 
+	prGlueInfo->fgIsInSuspend = FALSE;
+	prGlueInfo->fgIsSuspended = FALSE;
 	/* 4 <3.1.4> set device to glue */
 	prGlueInfo->prDev = prDev;
 
@@ -3860,6 +4000,8 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 	prGlueInfo->prScanRequest = NULL;
 	prGlueInfo->prSchedScanRequest = NULL;
 
+	kalMemZero(prGlueInfo->drv_own_caller, CALLER_LENGTH);
+	kalMemZero(prGlueInfo->fw_own_caller, CALLER_LENGTH);
 
 #if CFG_SUPPORT_PASSPOINT
 	/* Init DAD */
@@ -4213,6 +4355,18 @@ void reset_p2p_mode(struct GLUE_INFO *prGlueInfo)
 
 	DBGLOG(INIT, INFO,
 			"ret = 0x%08x\n", (uint32_t) rWlanStatus);
+}
+
+int set_p2p_mode_handler_wrapper(struct net_device *netdev,
+			 struct PARAM_CUSTOM_P2P_SET_STRUCT p2pmode)
+{
+	while (rtnl_is_locked()) {
+		DBGLOG_LIMITED(INIT, WARN,
+			"sleep for 100ms and wait for rtnl_lock\n");
+		kalMsleep(100);
+	}
+
+	return set_p2p_mode_handler(netdev, p2pmode);
 }
 
 int set_p2p_mode_handler(struct net_device *netdev,
@@ -5556,6 +5710,10 @@ static void consys_log_event_notification(int cmd, int value)
 	rStatus = kalIoctl(prGlueInfo, connsysFwLogControl, &rFwLogCmd,
 			sizeof(struct CMD_CONNSYS_FW_LOG), &u4BufLen);
 
+	if (cmd == FW_LOG_CMD_ON_OFF)
+		fw_log_set_enabled(prAdapter,
+				   value == 1 ? TRUE : FALSE);
+
 	if (fgRetrieveLog)
 		fw_log_handler();
 }
@@ -5895,7 +6053,7 @@ void wlanOnP2pRegistration(struct GLUE_INFO *prGlueInfo,
 	DBGLOG(INIT, TRACE, "start.\n");
 
 #if (CFG_ENABLE_WIFI_DIRECT && CFG_MTK_ANDROID_WMT)
-	register_set_p2p_mode_handler(set_p2p_mode_handler);
+	register_set_p2p_mode_handler(set_p2p_mode_handler_wrapper);
 #endif
 
 #if CFG_ENABLE_WIFI_DIRECT
@@ -6042,14 +6200,6 @@ int set_nan_handler(struct net_device *netdev, uint32_t ucEnable)
 	else if ((!prGlueInfo->prAdapter->fgIsNANRegistered) && (!ucEnable))
 		return 0;
 
-	if (ucEnable) {
-		struct PARAM_CUSTOM_P2P_SET_STRUCT rSetP2P;
-
-		rSetP2P.u4Mode = 0;
-		rSetP2P.u4Enable = 0;
-		set_p2p_mode_handler(netdev, rSetP2P);
-	}
-
 	if (!ucEnable)
 		nanNetUnregister(prGlueInfo, FALSE);
 
@@ -6065,10 +6215,6 @@ int set_nan_handler(struct net_device *netdev, uint32_t ucEnable)
 	 */
 	if ((ucEnable) && (prGlueInfo->prAdapter->fgIsNANRegistered))
 		nanNetRegister(prGlueInfo, FALSE); /* Fixme: error handling */
-
-	if (!ucEnable)
-		wlanOnP2pRegistration(prGlueInfo,
-			prGlueInfo->prAdapter, gprWdev[0]);
 
 	return 0;
 }
@@ -6545,6 +6691,8 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 			i4Status = prChipInfo->fw_dl_ops->mcu_init(prAdapter);
 		if (i4Status != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, "WF MCU init failed.\n");
+			conn_dbg_add_log(CONN_DBG_LOG_TYPE_HW_ERR,
+				"WF MCU init failed.\n");
 			eFailReason = ROM_DL_FAIL;
 			break;
 		}
@@ -6587,7 +6735,9 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 		}
 
 #if CFG_MTK_MDDP_SUPPORT
-		if (!IS_FEATURE_ENABLED(prWifiVar->fgMddpSupport))
+		if (IS_FEATURE_ENABLED(prWifiVar->fgMddpSupport))
+			mddpEnableMddpSupport();
+		else
 			mddpDisableMddpSupport();
 
 		mddpNotifyWifiOnStart();
@@ -6747,6 +6897,9 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 			wlanAdapterStop(prAdapter, FALSE);
 		/* fallthrough */
 		case ADAPTER_START_FAIL:
+			/*reset NVRAM State to ready for the next wifi-on*/
+			if (g_NvramFsm == NVRAM_STATE_SEND_TO_FW)
+				g_NvramFsm = NVRAM_STATE_READY;
 			glBusFreeIrq(prWdev->netdev,
 				*((struct GLUE_INFO **)
 						netdev_priv(prWdev->netdev)));
@@ -7344,10 +7497,21 @@ static int initWlan(void)
 	}
 #endif /* CFG_SUPPORT_ICS */
 
+#if (CFG_SUPPORT_SA_LOG == 1)
+	ret = SalogInit();
+	if (ret < 0) {
+		DBGLOG(INIT, INFO, "sa log node init failed!");
+		return ret;
+	}
+#endif /* CFG_SUPPORT_SA_LOG */
+
 	g_u4WlanInitFlag = 1;
 
 #if CFG_POWER_OFF_CTRL_SUPPORT
 	wlanRegisterRebootNotifier();
+#endif
+#if CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY
+	kalIdcRegisterRilNotifier();
 #endif
 #if CFG_AP_80211KVR_INTERFACE
 	nl_sk = netlink_kernel_create(&init_net, NETLINK_OSS_KERNEL, NULL);
@@ -7501,6 +7665,10 @@ static void exitWlan(void)
 	procUninitProcFs();
 #endif
 
+#if (CFG_SUPPORT_SA_LOG == 1)
+	SalogDeInit();
+#endif /* CFG_SUPPORT_SA_LOG */
+
 #if ((CFG_SUPPORT_ICS == 1) || (CFG_SUPPORT_PHY_ICS == 1))
 	IcsDeInit();
 #endif /* CFG_SUPPORT_ICS */
@@ -7509,6 +7677,9 @@ static void exitWlan(void)
 
 #if CFG_POWER_OFF_CTRL_SUPPORT
 	wlanUnregisterRebootNotifier();
+#endif
+#if CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY
+	kalIdcUnregisterRilNotifier();
 #endif
 	DBGLOG(INIT, INFO, "exitWlan::End\n");
 }				/* end of exitWlan() */

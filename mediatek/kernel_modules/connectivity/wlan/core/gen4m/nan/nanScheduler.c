@@ -367,7 +367,8 @@ struct _NAN_SCHED_CMD_MANAGE_PEER_SCH_REC_T {
 struct _NAN_SCHED_CMD_UPDATE_PEER_CAPABILITY_T {
 	uint32_t u4SchIdx;
 	uint8_t ucSupportedBands;
-	uint8_t aucRsvd[3];
+	uint16_t u2MaxChnlSwitchTime;
+	uint8_t aucRsvd[1];
 };
 
 struct _NAN_SCHED_CMD_MAP_STA_REC_T {
@@ -403,6 +404,11 @@ struct _NAN_SCHED_CMD_UPDATE_PONTENTIAL_CHNL_LIST_T {
 	struct _NAN_POTENTIAL_CHNL_T arChnlList[NAN_MAX_POTENTIAL_CHNL_LIST];
 };
 
+struct _NAN_SCHED_CMD_SET_SCHED_VER_T {
+	uint8_t ucNdlFlowCtrlVer;
+	uint8_t aucRsvd[3];
+};
+
 struct _NAN_SCHED_EVENT_SCHEDULE_CONFIG_T {
 	uint8_t fgEn2g;
 	uint8_t fgEn5gH;
@@ -412,6 +418,11 @@ struct _NAN_SCHED_EVENT_SCHEDULE_CONFIG_T {
 
 struct _NAN_SCHED_EVENT_DW_INTERVAL_T {
 	uint8_t ucDwInterval;
+};
+
+struct _NAN_SCHED_EVENT_DEV_CAP_T {
+	uint16_t u2MaxChnlSwitchTimeUs;
+	uint8_t aucRsvd[2];
 };
 
 struct _NAN_NONNAN_NETWORK_TIMELINE_T {
@@ -1370,6 +1381,7 @@ nanSchedInit(struct ADAPTER *prAdapter) {
 	nanSchedReleaseAllPeerSchDesc(prAdapter);
 
 	nanSchedConfigPhyParams(prAdapter);
+	nanSchedCmdUpdateSchedVer(prAdapter);
 
 	return WLAN_STATUS_SUCCESS;
 }
@@ -4066,7 +4078,10 @@ nanSchedConfigGetAllowedBw(struct ADAPTER *prAdapter, uint8_t ucChannel) {
 	enum _NAN_CHNL_BW_MAP eBwMap;
 	uint32_t u4SupportedBw;
 
-	eBwMap = prAdapter->rWifiVar.ucNanBandwidth;
+	eBwMap = (ucChannel < 36) ?
+		prAdapter->rWifiVar.ucNan2gBandwidth :
+		prAdapter->rWifiVar.ucNan5gBandwidth;
+	/* NAN 2G BW check */
 	if (((ucChannel < 36) || (!prAdapter->rWifiVar.fgEnNanVHT)) &&
 	    (eBwMap > NAN_CHNL_BW_40))
 		eBwMap = NAN_CHNL_BW_40;
@@ -4130,7 +4145,8 @@ nanSchedConfigAllowedBand(struct ADAPTER *prAdapter, unsigned char fgEn2g,
 	struct _NAN_SCHEDULER_T *prNanScheduler;
 	/* whsu */
 	/* UINT_8 ucDiscChnlBw = BW_20; */
-	uint8_t ucDiscChnlBw = MAX_BW_20MHZ;
+	uint8_t ucDisc2GChnlBw = MAX_BW_20MHZ;
+	uint8_t ucDisc5GChnlBw = MAX_BW_20MHZ;
 
 	prNanScheduler = nanGetScheduler(prAdapter);
 
@@ -4141,15 +4157,17 @@ nanSchedConfigAllowedBand(struct ADAPTER *prAdapter, unsigned char fgEn2g,
 	DBGLOG(NAN, INFO, "Allowed Band: %d, %d, %d\n", fgEn2g, fgEn5gH,
 	       fgEn5gL);
 
-	ucDiscChnlBw = prAdapter->rWifiVar.ucNanBandwidth;
+	ucDisc2GChnlBw = prAdapter->rWifiVar.ucNan2gBandwidth;
+	ucDisc5GChnlBw = prAdapter->rWifiVar.ucNan5gBandwidth;
+	/* NAN 2G BW check */
 	if ((!prAdapter->rWifiVar.fgEnNanVHT) &&
-	    (ucDiscChnlBw > NAN_CHNL_BW_40))
-		ucDiscChnlBw = NAN_CHNL_BW_40;
+	    (ucDisc2GChnlBw > NAN_CHNL_BW_40))
+		ucDisc2GChnlBw = NAN_CHNL_BW_40;
 
 	g_r2gDwChnl.rChannel.u4Type = NAN_BAND_CH_ENTRY_LIST_TYPE_CHNL;
 	g_r2gDwChnl.rChannel.u4AuxCenterChnl = 0;
 	g_r2gDwChnl.rChannel.u4PrimaryChnl = NAN_2P4G_DISC_CHANNEL;
-	if (ucDiscChnlBw == NAN_CHNL_BW_20)
+	if (ucDisc2GChnlBw == NAN_CHNL_BW_20)
 		g_r2gDwChnl.rChannel.u4OperatingClass =
 			NAN_2P4G_DISC_CH_OP_CLASS;
 	else
@@ -4161,10 +4179,10 @@ nanSchedConfigAllowedBand(struct ADAPTER *prAdapter, unsigned char fgEn2g,
 	if (fgEn5gH) {
 		g_r5gDwChnl.rChannel.u4PrimaryChnl = NAN_5G_HIGH_DISC_CHANNEL;
 
-		if (ucDiscChnlBw == NAN_CHNL_BW_20)
+		if (ucDisc5GChnlBw == NAN_CHNL_BW_20)
 			g_r5gDwChnl.rChannel.u4OperatingClass =
 				NAN_5G_HIGH_DISC_CH_OP_CLASS;
-		else if (ucDiscChnlBw == NAN_CHNL_BW_40)
+		else if (ucDisc5GChnlBw == NAN_CHNL_BW_40)
 			g_r5gDwChnl.rChannel.u4OperatingClass =
 				NAN_5G_HIGH_BW40_DISC_CH_OP_CLASS;
 		else
@@ -4173,10 +4191,10 @@ nanSchedConfigAllowedBand(struct ADAPTER *prAdapter, unsigned char fgEn2g,
 	} else if (fgEn5gL) {
 		g_r5gDwChnl.rChannel.u4PrimaryChnl = NAN_5G_LOW_DISC_CHANNEL;
 
-		if (ucDiscChnlBw == NAN_CHNL_BW_20)
+		if (ucDisc5GChnlBw == NAN_CHNL_BW_20)
 			g_r5gDwChnl.rChannel.u4OperatingClass =
 				NAN_5G_LOW_DISC_CH_OP_CLASS;
-		else if (ucDiscChnlBw == NAN_CHNL_BW_40)
+		else if (ucDisc5GChnlBw == NAN_CHNL_BW_40)
 			g_r5gDwChnl.rChannel.u4OperatingClass =
 				NAN_5G_LOW_BW40_DISC_CH_OP_CLASS;
 		else
@@ -6482,7 +6500,10 @@ nanSchedNegoGenNdcCrb(struct ADAPTER *prAdapter) {
 	}
 
 	/* Step2 allocate new NDC CRB */
-	if (prScheduler->fgEn5gH || prScheduler->fgEn5gL)
+	if ((prScheduler->fgEn5gH || prScheduler->fgEn5gL)
+		&& (nanRegGetNanChnlBand(
+		nanSchedGetFixedChnlInfo(prAdapter))
+		!= BAND_2G4))
 		u4SlotOffset = NAN_5G_DW_INDEX + 1;
 	else
 		u4SlotOffset = NAN_2G_DW_INDEX + 1;
@@ -8060,9 +8081,14 @@ nanSchedCmdUpdatePotentialChnlList(struct ADAPTER *prAdapter) {
 	u4Num = 0;
 	prPotentialChnlList = prCmdUpdatePontentialChnlList->arChnlList;
 
-	for (prPotentialChnlMap = g_arPotentialChnlMap;
-	     prPotentialChnlMap->ucPrimaryChnl != 0; prPotentialChnlMap++) {
-		eBwMap = prAdapter->rWifiVar.ucNanBandwidth;
+	for (prPotentialChnlMap =
+		g_arPotentialChnlMap;
+		prPotentialChnlMap->ucPrimaryChnl != 0;
+		prPotentialChnlMap++) {
+		eBwMap = (prPotentialChnlMap->ucPrimaryChnl < 36) ?
+			prAdapter->rWifiVar.ucNan2gBandwidth :
+			prAdapter->rWifiVar.ucNan5gBandwidth;
+		/* NAN 2G BW check*/
 		if (((prPotentialChnlMap->ucPrimaryChnl < 36) ||
 		     (!prAdapter->rWifiVar.fgEnNanVHT)) &&
 		    (eBwMap > NAN_CHNL_BW_40))
@@ -8330,6 +8356,7 @@ nanSchedCmdUpdatePeerCapability(struct ADAPTER *prAdapter, uint32_t u4SchIdx) {
 	uint8_t ucSupportedBands;
 	uint32_t u4Idx;
 	struct _NAN_DEVICE_CAPABILITY_T *prDevCapList;
+	uint16_t u2MaxChnlSwitchTime = 0;
 
 	prPeerSchRecord = nanSchedGetPeerSchRecord(prAdapter, u4SchIdx);
 	if (!prPeerSchRecord || prPeerSchRecord->fgActive != TRUE ||
@@ -8372,11 +8399,18 @@ nanSchedCmdUpdatePeerCapability(struct ADAPTER *prAdapter, uint32_t u4SchIdx) {
 	prDevCapList = prPeerSchRecord->prPeerSchDesc->arDevCapability;
 	for (u4Idx = 0; u4Idx < (NAN_NUM_AVAIL_DB + 1);
 		u4Idx++, prDevCapList++) {
-		if (prDevCapList->fgValid)
+		if (prDevCapList->fgValid) {
 			ucSupportedBands |= prDevCapList->ucSupportedBand;
+			u2MaxChnlSwitchTime =
+				(prDevCapList->u2MaxChnlSwitchTime
+				>= u2MaxChnlSwitchTime) ?
+				prDevCapList->u2MaxChnlSwitchTime :
+				u2MaxChnlSwitchTime;
+		}
 	}
 
 	prCmdUpdatePeerCap->ucSupportedBands = ucSupportedBands;
+	prCmdUpdatePeerCap->u2MaxChnlSwitchTime = u2MaxChnlSwitchTime;
 
 	rStatus = wlanSendSetQueryCmd(prAdapter, CMD_ID_NAN_EXT_CMD, TRUE,
 				      FALSE, FALSE, NULL, nicCmdTimeoutCommon,
@@ -8701,6 +8735,64 @@ nanSchedCmdUpdatePhySettigns(struct ADAPTER *prAdapter,
 }
 
 uint32_t
+nanSchedCmdUpdateSchedVer(struct ADAPTER *prAdapter) {
+	uint32_t rStatus = WLAN_STATUS_SUCCESS;
+	struct _NAN_SCHED_CMD_SET_SCHED_VER_T *prNanSchedVer;
+
+	void *prCmdBuffer;
+	uint32_t u4CmdBufferLen;
+	struct _CMD_EVENT_TLV_COMMOM_T *prTlvCommon = NULL;
+	struct _CMD_EVENT_TLV_ELEMENT_T *prTlvElement = NULL;
+
+	u4CmdBufferLen = sizeof(struct _CMD_EVENT_TLV_COMMOM_T) +
+			 sizeof(struct _CMD_EVENT_TLV_ELEMENT_T) +
+			 sizeof(struct _NAN_SCHED_CMD_SET_SCHED_VER_T);
+	prCmdBuffer = cnmMemAlloc(prAdapter, RAM_TYPE_BUF, u4CmdBufferLen);
+
+	if (!prCmdBuffer) {
+		DBGLOG(NAN, ERROR, "Memory allocation fail\n");
+		return WLAN_STATUS_FAILURE;
+	}
+
+	prTlvCommon = (struct _CMD_EVENT_TLV_COMMOM_T *)prCmdBuffer;
+	prTlvCommon->u2TotalElementNum = 0;
+
+	rStatus = nicAddNewTlvElement(
+		NAN_CMD_SET_SCHED_VERSION,
+		sizeof(struct _NAN_SCHED_CMD_SET_SCHED_VER_T),
+		u4CmdBufferLen, prCmdBuffer);
+
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(NAN, ERROR, "Add new Tlv element fail\n");
+		cnmMemFree(prAdapter, prCmdBuffer);
+		return WLAN_STATUS_FAILURE;
+	}
+
+	prTlvElement = nicGetTargetTlvElement(1, prCmdBuffer);
+
+	if (prTlvElement == NULL) {
+		DBGLOG(NAN, ERROR, "Get target Tlv element fail\n");
+		cnmMemFree(prAdapter, prCmdBuffer);
+		return WLAN_STATUS_FAILURE;
+	}
+
+	prNanSchedVer = (struct _NAN_SCHED_CMD_SET_SCHED_VER_T *)
+				prTlvElement->aucbody;
+	prNanSchedVer->ucNdlFlowCtrlVer = prAdapter->rWifiVar.ucNdlFlowCtrlVer;
+	DBGLOG(NAN, INFO, "Set NDL version:%u\n",
+		prNanSchedVer->ucNdlFlowCtrlVer);
+
+	rStatus = wlanSendSetQueryCmd(prAdapter, CMD_ID_NAN_EXT_CMD, TRUE,
+				      FALSE, FALSE, NULL, nicCmdTimeoutCommon,
+				      u4CmdBufferLen, (uint8_t *)prCmdBuffer,
+				      NULL, 0);
+
+	cnmMemFree(prAdapter, prCmdBuffer);
+
+	return rStatus;
+}
+
+uint32_t
 nanSchedEventScheduleConfig(struct ADAPTER *prAdapter, uint32_t u4SubEvent,
 			    uint8_t *pucBuf) {
 	uint32_t rRetStatus = WLAN_STATUS_SUCCESS;
@@ -8718,6 +8810,19 @@ nanSchedEventScheduleConfig(struct ADAPTER *prAdapter, uint32_t u4SubEvent,
 					 prWifiVar->ucDftRangQuotaVal);
 
 	nanSchedCmdUpdatePotentialChnlList(prAdapter);
+
+	return rRetStatus;
+}
+
+uint32_t
+nanSchedEventDevCapability(struct ADAPTER *prAdapter, uint32_t u4SubEvent,
+			uint8_t *pucBuf) {
+	uint32_t rRetStatus = WLAN_STATUS_SUCCESS;
+	struct _NAN_SCHED_EVENT_DEV_CAP_T *prEventDevCap;
+
+	prEventDevCap = (struct _NAN_SCHED_EVENT_DEV_CAP_T *)pucBuf;
+	g_u4MaxChnlSwitchTimeUs = prEventDevCap->u2MaxChnlSwitchTimeUs;
+	DBGLOG(NAN, INFO, "MaxChnlSwitchTime:%d us\n", g_u4MaxChnlSwitchTimeUs);
 
 	return rRetStatus;
 }
@@ -8926,6 +9031,9 @@ nanSchedulerUniEventDispatch(struct ADAPTER *prAdapter, uint32_t u4SubEvent,
 	case UNI_EVENT_NAN_TAG_DW_INTERVAL:
 		nanSchedEventDwInterval(prAdapter, u4SubEvent, pucBuf);
 		break;
+	case UNI_EVENT_NAN_TAG_ID_DEVICE_CAPABILITY:
+		nanSchedEventDevCapability(prAdapter, u4SubEvent, pucBuf);
+		break;
 	default:
 		break;
 	}
@@ -8954,6 +9062,9 @@ nanSchedulerEventDispatch(struct ADAPTER *prAdapter, uint32_t u4SubEvent,
 		break;
 	case NAN_EVENT_DW_INTERVAL:
 		nanSchedEventDwInterval(prAdapter, u4SubEvent, pucBuf);
+		break;
+	case NAN_EVENT_ID_DEVICE_CAPABILITY:
+		nanSchedEventDevCapability(prAdapter, u4SubEvent, pucBuf);
 		break;
 	default:
 		break;
@@ -9842,8 +9953,19 @@ nanSchedCommitNonNanChnlList(struct ADAPTER *prAdapter) {
 		return WLAN_STATUS_NOT_ACCEPTED;
 	}
 
-	/* Skip if NDP not setup, and AIS operated under 2.4G */
-	if ((eNanBand == BAND_NULL) && (eNonNanBand == BAND_2G4)) {
+	/* Skip if NDP fix channel on 2.4G, and AIS operated under 5G */
+	if (nanRegGetNanChnlBand
+		(nanSchedGetFixedChnlInfo(prAdapter))
+		== BAND_2G4) {
+		if (eNonNanBand != BAND_2G4) {
+			DBGLOG(NAN, INFO,
+			"Skip. NDP fixed on 2.4G, AIS use 5G\n");
+			return WLAN_STATUS_NOT_ACCEPTED;
+		}
+	} else if (eNonNanBand == BAND_2G4) {
+		/* Skip if NDP not fix channel at 2.4G
+		* but AIS operated under 2.4G
+		*/
 		DBGLOG(NAN, INFO, "Skip. NDP Null, AIS in 2G\n");
 		return WLAN_STATUS_NOT_ACCEPTED;
 	}

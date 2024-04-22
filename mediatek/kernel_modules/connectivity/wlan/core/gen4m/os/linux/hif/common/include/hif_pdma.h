@@ -502,6 +502,7 @@ struct RTMP_DMABUF {
 	unsigned long AllocSize;
 	void *AllocVa;		/* TxBuf virtual address */
 	phys_addr_t AllocPa;		/* TxBuf physical address */
+	u_int8_t fgIsCopyPath;	/* RxBuf is copy path */
 };
 
 /*
@@ -544,11 +545,7 @@ struct RTMP_TX_RING {
 	uint32_t hw_cnt_addr;
 	uint32_t hw_cnt_mask;
 	uint32_t hw_cnt_shift;
-#if CFG_SUPPORT_RX_WORK
-	struct mutex rTxDmaQMutex;
-#else /* CFG_SUPPORT_RX_WORK */
 	spinlock_t rTxDmaQLock;
-#endif /* CFG_SUPPORT_RX_WORK */
 	u_int8_t fgStopRecycleDmad;
 };
 
@@ -571,6 +568,8 @@ struct RTMP_RX_RING {
 	uint32_t hw_cnt_mask;
 	uint32_t hw_cnt_shift;
 	bool fgIsDumpLog;
+	bool fgIsWaitRxDmaDoneTimeout;
+	uint32_t u4LastRxEventWaitDmaDoneCnt;
 	uint32_t u4PendingCnt;
 	void *pvPacket;
 	uint32_t u4PacketLen;
@@ -886,6 +885,7 @@ enum pcie_msi_int_type {
 	AP_MISC_INT,
 	MDDP_INT,
 	CCIF_INT,
+	AP_DRV_OWN,
 	NONE_INT
 };
 
@@ -936,6 +936,7 @@ void halWpdmaProcessCmdDmaDone(struct GLUE_INFO *prGlueInfo,
 			       uint16_t u2Port);
 void halWpdmaProcessDataDmaDone(struct GLUE_INFO *prGlueInfo,
 				uint16_t u2Port);
+u_int8_t halIsWfdmaRxRingReady(struct GLUE_INFO *prGlueInfo, uint8_t ucRingNum);
 uint32_t halWpdmaGetRxDmaDoneCnt(struct GLUE_INFO *prGlueInfo,
 				 uint8_t ucRingNum);
 void halInitMsduTokenInfo(struct ADAPTER *prAdapter);
@@ -1065,7 +1066,6 @@ void kalDumpTxRing(struct GLUE_INFO *prGlueInfo,
 void kalDumpRxRing(struct GLUE_INFO *prGlueInfo,
 		   struct RTMP_RX_RING *prRxRing,
 		   uint32_t u4Num, bool fgDumpContent);
-void haldumpPhyInfo(struct ADAPTER *prAdapter);
 int wf_ioremap_read(phys_addr_t addr, unsigned int *val);
 int wf_ioremap_write(phys_addr_t addr, unsigned int val);
 void halEnableSlpProt(struct GLUE_INFO *prGlueInfo);
@@ -1094,6 +1094,8 @@ void halSwEmiDebug(struct GLUE_INFO *prGlueInfo);
 void halRroTurnOff(struct GLUE_INFO *prGlueInfo);
 void halRroInit(struct GLUE_INFO *prGlueInfo);
 void halRroUninit(struct GLUE_INFO *prGlueInfo);
+void halOffloadAllocMem(struct GLUE_INFO *prGlueInfo);
+void halOffloadFreeMem(struct GLUE_INFO *prGlueInfo);
 void halRroAllocMem(struct GLUE_INFO *prGlueInfo);
 void halRroResetMem(struct GLUE_INFO *prGlueInfo);
 void halRroAllocRcbList(struct GLUE_INFO *prGlueInfo);

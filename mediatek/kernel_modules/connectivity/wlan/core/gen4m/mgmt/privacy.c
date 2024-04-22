@@ -276,15 +276,26 @@ u_int8_t secCheckClassError(struct ADAPTER *prAdapter,
 {
 	void *prRxStatus;
 	struct RX_DESC_OPS_T *prRxDescOps;
+	uint8_t ucBssIndex;
+	struct BSS_INFO *prBssInfo;
+
+	if (!prStaRec)
+		return FALSE;
 
 	prRxDescOps = prAdapter->chip_info->prRxDescOps;
 	prRxStatus = prSwRfb->prRxStatus;
+	ucBssIndex = prStaRec->ucBssIndex;
+	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIndex);
+
+	if (!prBssInfo) {
+		DBGLOG(RX, ERROR, "Invalid bssidx:%d\n", ucBssIndex);
+		return FALSE;
+	}
 
 	if (prRxDescOps->nic_rxd_get_sw_class_error_bit(prRxStatus)
-	    || (IS_STA_IN_AIS(prStaRec)
-		&& aisGetAisBssInfo(prAdapter,
-		prStaRec->ucBssIndex)->eConnectionState ==
-		MEDIA_STATE_DISCONNECTED)) {
+		|| (prBssInfo->eNetworkType == NETWORK_TYPE_AIS
+		&& aisGetAisBssInfo(prAdapter, ucBssIndex)->eConnectionState
+			== MEDIA_STATE_DISCONNECTED)) {
 
 		DBGLOG_LIMITED(RSN, WARN,
 			"RX_CLASSERR: prStaRec=%p PktTYpe=0x%x, WlanIdx=%d,",
@@ -1370,17 +1381,42 @@ void secPrivacyDumpWTBL(struct ADAPTER *prAdapter)
 
 	prWtbl = prAdapter->rWifiVar.arWtbl;
 
-	DBGLOG(RSN, TRACE, "The Wlan index\n");
+	DBGLOG(RSN, INFO, "The Wlan index\n");
 
 	for (i = 0; i < WTBL_SIZE; i++) {
 		if (prWtbl[i].ucUsed)
-			DBGLOG(RSN, TRACE,
+			DBGLOG(RSN, INFO,
 			       "#%d Used=%d  BSSIdx=%d keyid=%d P=%d STA=%d Addr="
 			       MACSTR "\n", i, prWtbl[i].ucUsed,
 			       prWtbl[i].ucBssIndex, prWtbl[i].ucKeyId,
 			       prWtbl[i].ucPairwise, prWtbl[i].ucStaIndex,
 			       MAC2STR(prWtbl[i].aucMacAddr));
 	}
+}
+
+uint8_t secCheckWTBLwlanIdxInUseByOther(struct ADAPTER *prAdapter,
+	uint8_t ucWlanIdx, uint8_t ucBssIndex)
+{
+	struct WLAN_TABLE *prWtbl;
+
+	prWtbl = prAdapter->rWifiVar.arWtbl;
+
+	if (prWtbl[ucWlanIdx].ucUsed) {
+		if (ucBssIndex == prWtbl[ucWlanIdx].ucBssIndex)
+			return FALSE;
+
+		DBGLOG(RSN, INFO,
+			"The Wlan index #%d is in use by other bss! BSSIdx=%d keyid=%d P=%d STA=%d Addr="
+			MACSTR "\n", ucWlanIdx,
+			prWtbl[ucWlanIdx].ucBssIndex,
+			prWtbl[ucWlanIdx].ucKeyId,
+			prWtbl[ucWlanIdx].ucPairwise,
+			prWtbl[ucWlanIdx].ucStaIndex,
+			MAC2STR(prWtbl[ucWlanIdx].aucMacAddr));
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1493,8 +1529,7 @@ void secHandleNoWtbl(struct ADAPTER *prAdapter,
 	struct SW_RFB *prSwRfb)
 {
 	/* Wtbl error handling. if no Wtbl */
-	struct WLAN_ACTION_FRAME *prMgmtHdr =
-		(struct WLAN_ACTION_FRAME *)prSwRfb->pvHeader;
+	struct WLAN_MAC_MGMT_HEADER *prMgmtHdr = prSwRfb->pvHeader;
 
 	prSwRfb->ucStaRecIdx =
 		secLookupStaRecIndexFromTA(prAdapter, prMgmtHdr->aucSrcAddr);

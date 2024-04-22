@@ -55,6 +55,7 @@ enum ENUM_P2P_DEV_STATE {
 	P2P_DEV_STATE_REQING_CHANNEL,
 	P2P_DEV_STATE_CHNL_ON_HAND,
 	P2P_DEV_STATE_OFF_CHNL_TX,
+	P2P_DEV_STATE_LISTEN_OFFLOAD,
 	/* Requesting Channel to Send Specific Frame. */
 	P2P_DEV_STATE_NUM
 };
@@ -89,8 +90,6 @@ struct MSG_P2P_CHNL_REQUEST {
 #else
 #define P2P_DEV_EXTEND_CHAN_TIME	500
 #endif
-
-#define P2P_DEV_WAIT_CHAN_TIME	500
 
 #if (CFG_DBDC_SW_FOR_P2P_LISTEN == 1)
 #define DBDC_P2P_LISTEN_SW_DELAY_TIME		4000
@@ -147,7 +146,7 @@ struct WFD_CFG_SETTINGS {
 
 #endif
 
-struct MSG_P2P_ACTIVE_DEV_BSS {
+struct MSG_P2P_UPDATE_DEV_BSS {
 	struct MSG_HDR rMsgHdr;
 };
 
@@ -166,6 +165,11 @@ struct P2P_OFF_CHNL_TX_REQ_INFO {
 	uint8_t ucBssIndex;
 };
 
+struct P2P_PENDING_MGMT_INFO {
+	struct LINK_ENTRY rLinkEntry;
+	uint64_t u8PendingMgmtCookie;
+};
+
 struct P2P_DEV_FSM_INFO {
 	uint8_t ucBssIndex;
 	/* State related. */
@@ -179,6 +183,9 @@ struct P2P_DEV_FSM_INFO {
 
 	/* Mgmt tx related. */
 	struct P2P_MGMT_TX_REQ_INFO rMgmtTxInfo;
+
+	/* Listen offload related. */
+	struct P2P_LISTEN_OFFLOAD_INFO rLoInfo;
 
 	/* FSM Timer */
 	struct TIMER rP2pFsmTimeoutTimer;
@@ -223,6 +230,11 @@ struct MSG_P2P_ACS_REQUEST {
 	enum P2P_VENDOR_ACS_HW_MODE eHwMode;
 	uint32_t u4NumChannel;
 	struct RF_CHANNEL_INFO arChannelListInfo[1];
+};
+
+struct MSG_P2P_LISTEN_OFFLOAD {
+	struct MSG_HDR rMsgHdr;
+	struct P2P_LISTEN_OFFLOAD_INFO rInfo;
 };
 
 /*========================= Initial ============================*/
@@ -274,6 +286,18 @@ p2pDevFsmRunEventChnlGrant(struct ADAPTER *prAdapter,
 void p2pDevFsmRunEventMgmtTx(struct ADAPTER *prAdapter,
 		struct MSG_HDR *prMsgHdr);
 
+void p2pDevFsmListenOffloadStart(
+	struct ADAPTER *prAdapter,
+	struct MSG_HDR *prMsgHdr);
+
+void p2pDevListenOffloadStopHandler(
+	struct ADAPTER *prAdapter,
+	struct WIFI_EVENT *prEvent);
+
+void p2pDevFsmListenOffloadStop(
+	struct ADAPTER *prAdapter,
+	struct MSG_HDR *prMsgHdr);
+
 uint32_t
 p2pDevFsmRunEventMgmtFrameTxDone(struct ADAPTER *prAdapter,
 		struct MSDU_INFO *prMsduInfo,
@@ -284,7 +308,7 @@ void p2pDevFsmRunEventMgmtFrameRegister(struct ADAPTER *prAdapter,
 
 /* /////////////////////////////// */
 
-void p2pDevFsmRunEventActiveDevBss(struct ADAPTER *prAdapter,
+void p2pDevFsmRunEventUpdateDevBss(struct ADAPTER *prAdapter,
 		struct MSG_HDR *prMsgHdr);
 
 void

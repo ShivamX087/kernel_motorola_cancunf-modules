@@ -104,12 +104,6 @@
 #define ICMP_IDENTIFIER_OFFSET			4
 #define ICMP_SEQ_NUM_OFFSET			6
 
-#if CFG_MSCS_SUPPORT
-#define TCP_FLAG_SYN				0x02
-#define TCP_FLAG_SYN_ACK			0x12
-#define TCP_FLAG_ACK				0x10
-#endif
-
 #define ETH_P_1X                                0x888E
 #define ETH_P_PRE_1X                            0x88C7
 #if CFG_SUPPORT_WAPI
@@ -176,7 +170,15 @@
 #define ICMPV6_TYPE_NEIGHBOR_ADVERTISEMENT      0x88 /* 136 */
 
 #define TCP_HDR_FLAG_OFFSET                     13
+#define TCP_HDR_FLAG_FIN_BIT                    BIT(0)
+#define TCP_HDR_FLAG_SYN_BIT                    BIT(1)
+#define TCP_HDR_FLAG_RST_BIT                    BIT(2)
+#define TCP_HDR_FLAG_PSH_BIT                    BIT(3)
 #define TCP_HDR_FLAG_ACK_BIT                    BIT(4)
+#define TCP_HDR_FLAG_URG_BIT                    BIT(5)
+#define TCP_HDR_FLAG_SYN_ACK \
+		(TCP_HDR_FLAG_SYN_BIT | TCP_HDR_FLAG_ACK_BIT)
+#define TCP_HDR_FLAGS				BITS(0, 5)
 #define TCP_HDR_SRC_PORT_OFFSET                 0
 #define TCP_HDR_DST_PORT_OFFSET                 2
 #define TCP_HDR_SEQ                             4
@@ -1764,7 +1766,8 @@ enum BEACON_REPORT_DETAIL {
 #define VHT_OP_CHANNEL_WIDTH_80             1
 #define VHT_OP_CHANNEL_WIDTH_160            2
 #define VHT_OP_CHANNEL_WIDTH_80P80          3
-#define VHT_OP_CHANNEL_WIDTH_320            4
+#define VHT_OP_CHANNEL_WIDTH_320_1          4
+#define VHT_OP_CHANNEL_WIDTH_320_2          5
 
 /*8.4.1.50 Operating Mode Field*/
 #define VHT_OP_MODE_CHANNEL_WIDTH                   BITS(0, 1)
@@ -1779,11 +1782,11 @@ enum BEACON_REPORT_DETAIL {
 #define VHT_OP_MODE_RX_NSS_OFFSET                   4
 #define VHT_OP_MODE_RX_NSS_TYPE_OFFSET              7
 
+/* 9.4.2.158, Table 9-274 - VHT Operation Information subfields */
 #define VHT_OP_MODE_CHANNEL_WIDTH_20                0
 #define VHT_OP_MODE_CHANNEL_WIDTH_40                1
 #define VHT_OP_MODE_CHANNEL_WIDTH_80                2
 #define VHT_OP_MODE_CHANNEL_WIDTH_160_80P80         3
-#define VHT_OP_MODE_CHANNEL_WIDTH_320               4
 
 /* 8.4.1.22 SM Power Control field*/
 #define HT_SM_POWER_SAVE_CONTROL_ENABLED            BIT(0)
@@ -2306,6 +2309,8 @@ enum ENUM_MTK_OUI_CHIP_CAP {
 #define HE_OP_CHANNEL_WIDTH_80P80_160			3
 
 #define TBTT_INFO_BSS_PARAM_SAME_SSID               BIT(1)
+#define TBTT_INFO_BSS_PARAM_CO_LOCATED_AP           BIT(6)
+
 /* 9.4.2.260 Short SSID List element */
 #define ELEM_EXT_ID_SHORT_SSID_LIST                 58
 
@@ -2947,7 +2952,9 @@ struct IE_MBO_OCE {
 	uint8_t aucSubElements[1];
 } __KAL_ATTRIB_PACKED__;
 
-/* 8.5.7.6/8.5.7.7 Neighbor Report Request/Response frame format */
+/* 802.11-2020 9.6.6.6 Figure 9-864 Neighbor Report Request frame
+ * 802.11-2020 9.6.6.7 Figure 9-865 Neighbor Report Response frame
+ */
 __KAL_ATTRIB_PACKED_FRONT__
 struct ACTION_NEIGHBOR_REPORT_FRAME {
 	/* Neighbor Report Request/Response MAC header */
@@ -2961,7 +2968,7 @@ struct ACTION_NEIGHBOR_REPORT_FRAME {
 	uint8_t ucCategory;	/* Category */
 	uint8_t ucAction;	/* Action Value */
 	uint8_t ucDialogToken;	/* Dialog Token */
-	uint8_t aucInfoElem[1];	/* subelements */
+	uint8_t aucInfoElem[];	/* subelements */
 } __KAL_ATTRIB_PACKED__;
 
 __KAL_ATTRIB_PACKED_FRONT__
@@ -3457,7 +3464,10 @@ struct WLAN_PUBLIC_VENDOR_ACTION_FRAME {
 } __KAL_ATTRIB_PACKED__;
 
 
-/* 7.4.1.1 Spectrum Measurement Request frame format */
+/* 802.11-2020 9.6.2 Figure 9-854 Spectrum Measurement Request frame
+ * The Measurement Request Element field contains one or more of the
+ * Measurement Request elements
+ */
 __KAL_ATTRIB_PACKED_FRONT__
 struct ACTION_SM_REQ_FRAME {
 	/* ADDTS Request MAC header */
@@ -3515,6 +3525,7 @@ struct ACTION_TPC_REPORT_FRAME {
 } __KAL_ATTRIB_PACKED__;
 
 /* 7.4.1.5 Channel Switch Announcement frame format */
+/* 802.11-2020 9.6.2.6 Channel Switch Announcement frame */
 __KAL_ATTRIB_PACKED_FRONT__
 struct ACTION_CHANNEL_SWITCH_FRAME {
 	/* ADDTS Request MAC header */
@@ -3530,7 +3541,7 @@ struct ACTION_CHANNEL_SWITCH_FRAME {
 	uint8_t aucInfoElem[13]; /* Information elements */
 } __KAL_ATTRIB_PACKED__;
 
-/* 9.6.8.7 Extended Channel Switch Announcement frame format */
+/* 802.11-2020 9.6.7.7 Fig. 9-871 Extended Channel Switch Announcement frame */
 __KAL_ATTRIB_PACKED_FRONT__
 struct ACTION_EX_CHANNEL_SWITCH_FRAME {
 	/* MAC header */
@@ -3635,6 +3646,10 @@ struct ACTION_DELTS_FRAME {
 } __KAL_ATTRIB_PACKED__;
 
 /* 7.4.2.3 QOSMAPSET CONFIGURATE frame format */
+/* 802.11-2020 9.6.3.6 Table 9-356 QoS Map Configure frame
+ * QoS Map element (located at qosMapSet) is defined in 9.4.2.94,
+ * Element ID(1), Length(1), DSCP Exception List (nx2), UP0(2), ... UP7(2)
+ */
 struct _ACTION_QOS_MAP_CONFIGURE_FRAME {
 	/* QOSMAP CONFIGURE MAC header */
 	uint16_t u2FrameCtrl;	/* Frame Control */
@@ -3732,7 +3747,10 @@ struct _ACTION_VENDOR_SPEC_FRAME_T {
 };
 #endif
 
-/* 7.4.6.1 Radio Measurement Request frame format */
+/* 802.11-2020 9.6.6.2 Figure 9-860 Radio Measurement Request frame
+ * The Measurement Request Elements fields contains zero or more Measurement
+ * Request elements.
+ */
 __KAL_ATTRIB_PACKED_FRONT__
 struct ACTION_RM_REQ_FRAME {
 	/* MAC header */
@@ -3747,11 +3765,14 @@ struct ACTION_RM_REQ_FRAME {
 	uint8_t ucAction;	/* Action Value */
 	uint8_t ucDialogToken;	/* Dialog Token */
 	uint16_t u2Repetitions;	/* Number of repetitions */
-	uint8_t aucInfoElem[1];	/* Measurement Request elements, such as */
+	uint8_t aucInfoElem[];	/* Measurement Request elements, such as */
 				/* channel load request, and etc. */
 } __KAL_ATTRIB_PACKED__;
 
-/* 7.4.6.2 Radio Measurement Report frame format */
+/* 802.11-2020 9.6.6.3 Figure 9-861 Radio Measurement Response frame
+ * The Measurement Report Elements fields contains one or more Measurement
+ * Report.
+ */
 __KAL_ATTRIB_PACKED_FRONT__
 struct ACTION_RM_REPORT_FRAME {
 	/* MAC header */
@@ -3765,7 +3786,7 @@ struct ACTION_RM_REPORT_FRAME {
 	uint8_t ucCategory;	/* Category */
 	uint8_t ucAction;	/* Action Value */
 	uint8_t ucDialogToken;	/* Dialog Token */
-	uint8_t aucInfoElem[0];	/* Measurement Report elements, such as */
+	uint8_t aucInfoElem[];	/* Measurement Report elements, such as */
 				/* channel load report, and etc. */
 } __KAL_ATTRIB_PACKED__;
 
@@ -3956,6 +3977,10 @@ struct _ACTION_TWT_TEARDOWN_FRAME {
 } __KAL_ATTRIB_PACKED__;
 
 /* 11ax TWT Information frame format */
+/* 802.11-2020 9.6.24.12 Table 9-505 TWT Information frame
+ * TWT Information 9.4.1.60, B0-B7 are fixed fields
+ * B8-Bn, Next TWT, are variable in length of 0, 32, 48, or 64 bits.
+ */
 __KAL_ATTRIB_PACKED_FRONT__
 struct _ACTION_TWT_INFO_FRAME {
 	/* MAC header */

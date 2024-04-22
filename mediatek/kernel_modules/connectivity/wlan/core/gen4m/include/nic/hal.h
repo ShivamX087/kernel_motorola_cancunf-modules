@@ -142,6 +142,7 @@ enum ENUM_RRO_IND_REASON {
 	RRO_NOT_RRO_PKT,
 	RRO_TIMEOUT_STEP_ONE,
 	RRO_TIMEOUT_FLUSH_ALL,
+	RRO_BUF_RUN_OUT,
 	RRO_COUNTER_NUM
 };
 #endif /* CFG_SUPPORT_HOST_OFFLOAD == 1 */
@@ -243,7 +244,7 @@ do { \
 	} \
 	if (HAL_TEST_FLAG(_prAdapter, ADAPTER_FLAG_HW_ERR) == FALSE) { \
 		if (kalDevPortRead(_prAdapter->prGlueInfo, _u4Port, _u4Len, \
-			_pucBuf, _u4ValidBufSize) == FALSE) {\
+			_pucBuf, _u4ValidBufSize, FALSE) == FALSE) { \
 			HAL_SET_FLAG(_prAdapter, ADAPTER_FLAG_HW_ERR); \
 			fgIsBusAccessFailed = TRUE; \
 			DBGLOG(HAL, ERROR, "HAL_PORT_RD access fail! 0x%x\n", \
@@ -421,7 +422,7 @@ do { \
 		ASSERT(0); \
 	} \
 	kalDevPortRead(_prAdapter->prGlueInfo, _u4Port, \
-		_u4Len, _pucBuf, _u4ValidBufSize); \
+		_u4Len, _pucBuf, _u4ValidBufSize, FALSE); \
 }
 
 #define HAL_PORT_WR(_prAdapter, _u4Port, _u4Len, _pucBuf, _u4ValidBufSize) \

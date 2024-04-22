@@ -262,6 +262,7 @@
 /* Add to the negotiated WinSize to cope with Ball Behind after Fall Ahead */
 #define WLAN_RX_BA_EXT_SIZE 64
 #define WLAN_RX_BA_EXT_MAX_SIZE 256
+#define WLAN_TX_MAX_AMSDU_IN_AMPDU_LEN 11454
 
 /* Define for wifi path usage */
 #define WLAN_FLAG_2G4_WF0		BIT(0)	/*1: support, 0: NOT support */
@@ -278,15 +279,6 @@
 
 /* Define concurrent network channel number, using by CNM/CMD */
 #define MAX_OP_CHNL_NUM			3
-
-/* Stat CMD will have different format due to different algorithm support */
-#if (defined(MT6632) || defined(MT7668))
-#define CFG_SUPPORT_RA_GEN			0
-#define CFG_SUPPORT_TXPOWER_INFO		0
-#else
-#define CFG_SUPPORT_RA_GEN			1
-#define CFG_SUPPORT_TXPOWER_INFO		1
-#endif
 
 #if (CFG_SUPPORT_CONNAC2X == 1 || CFG_SUPPORT_CONNAC3X == 1)
 #define AGG_RANGE_SEL_NUM		15
@@ -1362,7 +1354,8 @@ enum ENUM_MAX_BANDWIDTH_SETTING {
 	MAX_BW_80MHZ,
 	MAX_BW_160MHZ,
 	MAX_BW_80_80_MHZ,
-	MAX_BW_320MHZ,
+	MAX_BW_320_1MHZ,
+	MAX_BW_320_2MHZ,
 	MAX_BW_UNKNOWN
 };
 
@@ -1958,6 +1951,14 @@ void wlanDumpBssStatistics(struct ADAPTER *prAdapter, uint8_t ucBssIndex);
 /*----------------------------------------------------------------------------*/
 /* query sta statistics information from driver and firmware                  */
 /*----------------------------------------------------------------------------*/
+
+#if (CFG_SUPPORT_STATS_ONE_CMD == 1)
+uint32_t
+wlanQueryStatsOneCmd(struct ADAPTER *prAdapter,
+		       void *pvQueryBuffer, uint32_t u4QueryBufferLen,
+		       uint32_t *pu4QueryInfoLen, uint8_t fgIsOid);
+#endif
+
 uint32_t
 wlanoidQueryStaStatistics(struct ADAPTER *prAdapter,
 			  void *pvQueryBuffer, uint32_t u4QueryBufferLen,
@@ -1968,6 +1969,10 @@ wlanQueryStaStatistics(struct ADAPTER *prAdapter, void *pvQueryBuffer,
 		       uint32_t u4QueryBufferLen,
 		       uint32_t *pu4QueryInfoLen,
 		       u_int8_t fgIsOid);
+
+uint32_t
+updateStaStats(struct ADAPTER *prAdapter,
+	struct PARAM_GET_STA_STATISTICS *prQueryStaStatistics);
 
 uint32_t
 wlanQueryStatistics(struct ADAPTER *prAdapter,

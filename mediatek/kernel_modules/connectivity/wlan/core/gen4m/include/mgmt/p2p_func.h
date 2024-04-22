@@ -128,6 +128,14 @@ p2pFuncUpdateBssInfoForJOIN(struct ADAPTER *prAdapter,
 		struct BSS_INFO *prP2pBssInfo,
 		struct SW_RFB *prAssocRspSwRfb);
 
+void
+p2pFuncAddPendingMgmtLinkEntry(struct ADAPTER *prAdapter,
+	uint8_t ucBssIdx, uint64_t u8Cookie);
+
+void
+p2pFuncRemovePendingMgmtLinkEntry(struct ADAPTER *prAdapter,
+	uint8_t ucBssIdx, uint64_t u8Cookie);
+
 void p2pFuncAcquireCh(struct ADAPTER *prAdapter,
 		uint8_t ucBssIdx,
 		struct P2P_CHNL_REQ_INFO *prChnlReqInfo);
@@ -343,6 +351,11 @@ struct MSDU_INFO *p2pFuncProcessP2pProbeRsp(struct ADAPTER *prAdapter,
 	uint8_t ucBssIdx, uint8_t fgNonTxLink, uint8_t fgHide,
 	struct WLAN_BEACON_FRAME *prProbeRspFrame);
 
+void
+p2pFuncProcessP2pProbeRspAction(struct ADAPTER *prAdapter,
+		struct MSDU_INFO *prMgmtTxMsdu,
+		uint8_t ucBssIdx);
+
 #if 0 /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0) */
 uint32_t
 p2pFuncCalculateExtra_IELenForBeacon(struct ADAPTER *prAdapter,
@@ -530,6 +543,8 @@ void p2pFunIndicateAcsResult(struct GLUE_INFO *prGlueInfo,
 
 void p2pFunCalAcsChnScores(struct ADAPTER *prAdapter);
 
+uint8_t p2pFuncIsCsaBlockScan(struct ADAPTER *prAdapter);
+
 enum ENUM_CHNL_SWITCH_POLICY
 p2pFunDetermineChnlSwitchPolicy(struct ADAPTER *prAdapter,
 		uint8_t ucBssIdx,
@@ -568,4 +583,10 @@ struct BSS_INFO *p2pGetAisBssByBand(
 
 struct BSS_INFO *p2pGetAisConnectedBss(
 	struct ADAPTER *prAdapter);
+
+uint32_t p2pFuncCalculateP2p_IELenForOwe(struct ADAPTER *prAdapter,
+		uint8_t ucBssIndex, struct STA_RECORD *prStaRec);
+
+void p2pFuncGenerateP2p_IEForOwe(struct ADAPTER *prAdapter,
+	struct MSDU_INFO *prMsduInfo);
 

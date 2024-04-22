@@ -6110,8 +6110,15 @@ static int32_t HQA_GetDumpRecal(struct net_device *prNetDev,
 
 	DBGLOG(RFTEST, INFO, "prReCalInfo->u4Count = [%d]\n",
 						 prReCalInfo->u4Count);
-	if (prReCalInfo->u4Count > 0) {
+	/*limit prReCalInfo->u4Count is 300 groups due to hqa buf is 4Kbyte*/
+	if (prReCalInfo->u4Count > 0 && prReCalInfo->u4Count < 300) {
 		for (i = 0; i < prReCalInfo->u4Count; i++) {
+
+			if ((6 + u4RespLen + (3 * sizeof(u4Value))) > sizeof(HqaCmdFrame->Data)) {
+				DBGLOG(RFTEST, INFO, "GetDumpRecal HQAFrame size limit reached");
+				break;
+			}
+
 			u4Value = ntohl(prCalArray[i].u4CalId);
 			kalMemCopy(HqaCmdFrame->Data + 6 + u4RespLen,
 					   &u4Value,
@@ -6133,11 +6140,11 @@ static int32_t HQA_GetDumpRecal(struct net_device *prNetDev,
 			u4RespLen += sizeof(u4Value);
 		}
 
-		u4Value = ntohl(prReCalInfo->u4Count);
+		u4Value = ntohl(i);
 		kalMemCopy(HqaCmdFrame->Data + 2, &u4Value, sizeof(u4Value));
 		ResponseToQA(HqaCmdFrame,
 			     prIwReqData,
-			     6 + prReCalInfo->u4Count * 12,
+			     6 + i * 12,
 			     0);
 	} else {
 		kalMemCopy(HqaCmdFrame->Data + 2, &prReCalInfo->u4Count, 4);

@@ -974,7 +974,7 @@ int32_t mddpNotifyDrvOwnTimeoutTime(void)
 	struct mddpw_drv_info_t *prDrvInfo;
 	int32_t ret = 0;
 	uint32_t u32BufSize = 0;
-	uint32_t u32DrvOwnTimeoutTime = LP_OWN_BACK_FAILED_LOG_SKIP_MS;
+	uint32_t u32DrvOwnTimeoutTime = LP_OWN_BACK_TOTAL_DELAY_MD_MS;
 	uint8_t *buff = NULL;
 
 	DBGLOG(INIT, INFO, "Wi-Fi Notify MD Drv Own Timeout time.\n");
@@ -985,8 +985,9 @@ int32_t mddpNotifyDrvOwnTimeoutTime(void)
 		goto exit;
 	}
 
+	/* align AP/MD drv own timeout */
 	if (mddpIsCasanFWload() == TRUE)
-		u32DrvOwnTimeoutTime = LP_OWN_BACK_FAILED_LOG_SKIP_CASAN_MS;
+		u32DrvOwnTimeoutTime = LP_OWN_BACK_TOTAL_DELAY_CASAN_MS;
 	else
 		goto exit;
 
@@ -1269,8 +1270,9 @@ void __mddpNotifyWifiOffStart(void)
 
 void mddpNotifyWifiOffStart(void)
 {
+#if defined(_HIF_PCIE)
 	struct GLUE_INFO *prGlueInfo = NULL;
-	struct ADAPTER *prAdapter = NULL;
+#endif
 
 	if (!mddpIsSupportMcifWifi())
 		return;
@@ -1289,19 +1291,16 @@ void mddpNotifyWifiOffStart(void)
 	__mddpNotifyWifiOffStart();
 	mutex_unlock(&rMddpLock);
 
+#if defined(_HIF_PCIE)
 	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);
 	if (prGlueInfo == NULL) {
 		DBGLOG(INIT, ERROR, "prGlueInfo is NULL.\n");
 		return;
 	}
-	prAdapter = prGlueInfo->prAdapter;
-	if (prAdapter == NULL) {
-		DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
-		return;
-	}
 
 	/* avoid power off process MD SER */
-	halNotifyMdCrash(prAdapter);
+	kalSetMdCrashEvent(prGlueInfo);
+#endif
 }
 
 void __mddpNotifyWifiOffEnd(void)
@@ -1458,21 +1457,23 @@ int32_t mddpMdNotifyInfo(struct mddpw_md_notify_info_t *prMdInfo)
 						prCurrStaRec,
 						TRUE);
 			}
-		}
 
-		prSapBssInfo = cnmGetOtherSapBssInfo(prAdapter, prP2pBssInfo);
-		if (prSapBssInfo) {
-			struct LINK *prClientList;
-			struct STA_RECORD *prCurrStaRec;
+			prSapBssInfo = cnmGetOtherSapBssInfo(prAdapter,
+					prP2pBssInfo);
+			if (prSapBssInfo) {
+				struct LINK *prClientList;
+				struct STA_RECORD *prCurrStaRec;
 
-			prClientList = &prSapBssInfo->rStaRecOfClientList;
-			LINK_FOR_EACH_ENTRY(prCurrStaRec, prClientList,
-					rLinkEntry, struct STA_RECORD) {
-				if (!prCurrStaRec)
-					break;
-				mddpNotifyDrvTxd(prAdapter,
-						prCurrStaRec,
-						TRUE);
+				prClientList =
+					&prSapBssInfo->rStaRecOfClientList;
+				LINK_FOR_EACH_ENTRY(prCurrStaRec, prClientList,
+						rLinkEntry, struct STA_RECORD) {
+					if (!prCurrStaRec)
+						break;
+					mddpNotifyDrvTxd(prAdapter,
+							prCurrStaRec,
+							TRUE);
+				}
 			}
 		}
 	} else if (prMdInfo->info_type == MDDPW_MD_INFO_DRV_EXCEPTION) {
@@ -1792,6 +1793,7 @@ void mddpInit(void)
 
 void mddpUninit(void)
 {
+	g_fgMddpEnabled = FALSE;
 	mddpUnregisterCb();
 }
 
@@ -1872,8 +1874,38 @@ static void save_mddp_stats(void)
 
 void mddpSetMDFwOwn(void)
 {
+	struct GLUE_INFO *prGlueInfo = NULL;
+	struct ADAPTER *prAdapter = NULL;
+	struct mt66xx_chip_info *prChipInfo = NULL;
+
+	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);
+	if (!prGlueInfo || !prGlueInfo->u4ReadyFlag) {
+		DBGLOG(INIT, ERROR, "Invalid drv state.\n");
+		return;
+	}
+
+	prAdapter = prGlueInfo->prAdapter;
+	if (prAdapter == NULL) {
+		DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
+		return;
+	}
+
+	prChipInfo = prAdapter->chip_info;
+
+#if defined(_HIF_PCIE)
+	if (prChipInfo->bus_info->hwControlVote)
+		prChipInfo->bus_info->hwControlVote(prAdapter,
+			FALSE, PCIE_VOTE_USER_MDDP);
+#endif
+
 	kalDevRegWrite(NULL, MD_LPCTL_ADDR, MDDP_LPCR_MD_SET_FW_OWN);
 	DBGLOG(INIT, INFO, "Set MD Fw Own.\n");
+
+#if defined(_HIF_PCIE)
+	if (prChipInfo->bus_info->hwControlVote)
+		prChipInfo->bus_info->hwControlVote(prAdapter,
+			TRUE, PCIE_VOTE_USER_MDDP);
+#endif
 }
 
 u_int8_t mddpIsMDFwOwn(void)
@@ -1886,9 +1918,14 @@ u_int8_t mddpIsMDFwOwn(void)
 	return (u4Val & BIT(0)) == BIT(0);
 }
 
+void mddpEnableMddpSupport(void)
+{
+	if (!g_fgMddpEnabled)
+		mddpRegisterCb();
+}
+
 void mddpDisableMddpSupport(void)
 {
-	g_fgMddpEnabled = FALSE;
 	if (gMddpFunc.wifi_handle)
 		mddpUnregisterCb();
 }

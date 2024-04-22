@@ -1081,6 +1081,11 @@ void mt6639_dumpPcieReg(void)
 		0x7403121C, &u4Value);
 	DBGLOG(HAL, INFO, "CR[0x7403121C] value[0x%08x]\n", u4Value);
 }
+
+bool mt6639_CheckDumpViaBt(void)
+{
+	return (fgIsBusAccessFailed || fgIsMcuOff) && fgTriggerDebugSop;
+}
 #endif
 void mt6639_dumpCbtopReg(struct ADAPTER *ad)
 {
@@ -1546,6 +1551,10 @@ void mt6639_dumpWfBusReg(struct ADAPTER *ad)
 static void mt6639_dumpConninfraBus(struct ADAPTER *ad)
 {
 	uint32_t WFDrvOwnStat = 0, MDDrvOwnStat = 0;
+#if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
+	struct CHIP_DBG_OPS *prDebugOps = NULL;
+	bool dumpViaBt = FALSE;
+#endif
 
 	if (!ad) {
 		DBGLOG(HAL, ERROR, "NULL ADAPTER.\n");
@@ -1553,7 +1562,11 @@ static void mt6639_dumpConninfraBus(struct ADAPTER *ad)
 	}
 
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
-	connv3_conninfra_bus_dump(fgIsBusAccessFailed ?
+	prDebugOps = ad->chip_info->prDebugOps;
+		if (prDebugOps && prDebugOps->checkDumpViaBt)
+			dumpViaBt = prDebugOps->checkDumpViaBt();
+
+	connv3_conninfra_bus_dump(dumpViaBt ?
 		CONNV3_DRV_TYPE_BT : CONNV3_DRV_TYPE_WIFI);
 
 	HAL_MCR_RD(ad, CONNAC3X_BN0_LPCTL_ADDR, &WFDrvOwnStat);
@@ -1567,10 +1580,11 @@ void mt6639_DumpBusHangCr(struct ADAPTER *ad)
 {
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct BUS_INFO *prBusInfo = NULL;
-	u_int8_t readable = TRUE;
+	bool readable = TRUE;
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
+	struct CHIP_DBG_OPS *prDebugOps = NULL;
+	bool dumpViaBt = FALSE;
 	int ret = 0;
-	u_int8_t dumpViaBt = fgIsBusAccessFailed && fgTriggerDebugSop;
 #endif
 
 	if (!ad) {
@@ -1585,8 +1599,17 @@ void mt6639_DumpBusHangCr(struct ADAPTER *ad)
 	if (prBusInfo->dumpPcieStatus)
 		readable = prBusInfo->dumpPcieStatus(ad->prGlueInfo);
 
+#if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
+	prDebugOps = ad->chip_info->prDebugOps;
+	if (prDebugOps && prDebugOps->checkDumpViaBt)
+		dumpViaBt = prDebugOps->checkDumpViaBt();
+
 	if (readable == FALSE && !dumpViaBt)
 		goto exit;
+#else
+	if (readable == FALSE)
+		goto exit;
+#endif
 
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
 	if (dumpViaBt) {
@@ -1596,7 +1619,8 @@ void mt6639_DumpBusHangCr(struct ADAPTER *ad)
 		if (ret != 0) {
 			DBGLOG(HAL, ERROR, "connv3_hif_dbg_start failed.\n");
 			goto exit_debug_sop;
-		}
+		} else
+			DBGLOG(HAL, INFO, "start BT dump.\n");
 	}
 #endif
 
@@ -1620,8 +1644,6 @@ void mt6639_DumpBusHangCr(struct ADAPTER *ad)
 			CONNV3_DRV_TYPE_BT);
 		if (ret != 0)
 			DBGLOG(HAL, ERROR, "connv3_hif_dbg_end failed.\n");
-
-		fgTriggerDebugSop = FALSE;
 	}
 
 exit_debug_sop:
@@ -1686,7 +1708,7 @@ int mt6639_get_rx_rate_info(const uint32_t *prRxV,
 	prRxRateInfo->u4Bw = frmode;
 	prRxRateInfo->u4Gi = sgi;
 
-	DBGLOG(SW4, TRACE,
+	DBGLOG_LIMITED(SW4, TRACE,
 		   "rxvec0=0x%x rxmode=%u, rate=%u, bw=%u, sgi=%u, nss=%u, mu_mimo=%u\n",
 		   prRxV[0], rxmode, rate, frmode, sgi, nss, mu_mimo);
 

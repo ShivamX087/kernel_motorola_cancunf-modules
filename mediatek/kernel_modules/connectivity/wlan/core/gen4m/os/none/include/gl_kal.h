@@ -249,6 +249,7 @@ enum ENUM_SPIN_LOCK_CATEGORY_E {
 	SPIN_LOCK_TX_MGMT_DIRECT_Q,
 #endif
 	SPIN_LOCK_HIF_REMAP,
+	SPIN_LOCK_PMKID,
 	SPIN_LOCK_NUM
 };
 
@@ -864,6 +865,7 @@ int kal_test_bit(unsigned long bit, unsigned long *p);
 
 #define kalGetTimeTick() KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__)
 #define kalGetTimeTickNs() KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__)
+#define kalGetJiffies() KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__)
 
 #ifdef CFG_COMBO_SLT_GOLDEN
 #define WLAN_TAG                        "[wlan_golden]"
@@ -1042,6 +1044,10 @@ KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo, _pvPacket)
 
 #define kalPacketAllocWithHeadroom(_prGlueInfo, _u4Size, _ppucData) \
 ((void *) KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo))
+
+#define kalGetUIntRealTime() \
+((uint64_t) KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__))
+
 #else
 void kalAcquireSpinLock(struct GLUE_INFO *prGlueInfo,
 			enum ENUM_SPIN_LOCK_CATEGORY_E rLockCategory,
@@ -1071,7 +1077,11 @@ void *kalPacketAlloc(struct GLUE_INFO *prGlueInfo,
 void *kalPacketAllocWithHeadroom(struct GLUE_INFO
 				 *prGlueInfo,
 				 uint32_t u4Size, uint8_t **ppucData);
+uint64_t kalGetUIntRealTime(void);
 #endif
+
+#define kalDuplicateSwRfbSanity(_prSwRfb) \
+	KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__)
 
 void kalOsTimerInitialize(struct GLUE_INFO *prGlueInfo,
 			  void *prTimerHandler);
@@ -1176,7 +1186,7 @@ KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo, _prMacAddr)
 	KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo)
 
 #if CFG_SUPPORT_DFS
-#define	kalIndicateChannelSwitch(_prGlueInfo, _eSco, _ucChannelNum, _eBand) \
+#define	kalIndicateChannelSwitch(_prGlueInfo, _eSco, _ucChannelNum, _eBand, _ucBssIndex) \
 	KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo)
 #endif
 
@@ -1208,7 +1218,8 @@ kalRemainOnChannelExpired(struct GLUE_INFO *prGlueInfo,
 void
 kalIndicateChannelSwitch(struct GLUE_INFO *prGlueInfo,
 			enum ENUM_CHNL_EXT eSco,
-			uint8_t ucChannelNum, enum ENUM_BAND eBand);
+			uint8_t ucChannelNum, enum ENUM_BAND eBand,
+			uint8_t ucBssIndex);
 #endif
 
 void
@@ -1250,7 +1261,7 @@ u_int8_t kalDevRegWrite_mac(struct GLUE_INFO *prGlueInfo,
 u_int8_t
 kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 	       uint16_t u2Port, uint32_t u2Len, uint8_t *pucBuf,
-	       uint32_t u2ValidOutBufSize);
+	       uint32_t u2ValidOutBufSize, u_int8_t isPollMode);
 
 u_int8_t
 kalDevPortWrite(struct GLUE_INFO *prGlueInfo,
@@ -1355,10 +1366,10 @@ void kalHandleAssocInfo(struct GLUE_INFO *prGlueInfo,
 			struct EVENT_ASSOC_INFO *prAssocInfo);
 
 #ifdef CFG_REMIND_IMPLEMENT
-#define kalGetFwVerOffsetAddr(void) \
+#define kalGetFwVerOffset(void) \
 	KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__)
 #else
-uint32_t kalGetFwVerOffsetAddr(void);
+uint32_t kalGetFwVerOffset(void);
 #endif
 
 #if CFG_ENABLE_FW_DOWNLOAD
@@ -2179,7 +2190,6 @@ uint32_t kalGetChannelFrequency(
 		uint8_t ucChannel,
 		uint8_t ucBand);
 
-enum ENUM_BAND kalOperatingClassToBand(uint16_t u2OpClass);
 #if (CFG_SUPPORT_SINGLE_SKU == 1)
 u_int8_t kalFillChannels(
 	struct GLUE_INFO *prGlueInfo,

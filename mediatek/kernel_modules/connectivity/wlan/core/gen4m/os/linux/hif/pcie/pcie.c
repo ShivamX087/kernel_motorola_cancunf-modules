@@ -72,11 +72,8 @@
  */
 
 #include "gl_os.h"
-
 #include "hif_pdma.h"
-
 #include "precomp.h"
-
 #include <linux/mm.h>
 #ifndef CONFIG_X86
 #include <asm/memory.h>
@@ -244,6 +241,8 @@ const struct of_device_id mtk_axi_of_ids[] = {
  */
 static probe_card pfWlanProbe;
 static remove_card pfWlanRemove;
+static u_int8_t g_AERRstTriggered;
+static u_int8_t g_AERL05Rst;
 
 static struct platform_driver mtk_axi_driver = {
 	.driver = {
@@ -252,6 +251,7 @@ static struct platform_driver mtk_axi_driver = {
 #ifdef CONFIG_OF
 		.of_match_table = mtk_axi_of_ids,
 #endif
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 	.id_table = mtk_axi_ids,
 	.probe = NULL,
@@ -546,12 +546,17 @@ irqreturn_t pcie_drv_own_thread_handler(int irq, void *dev_instance)
 {
 	struct GLUE_INFO *prGlueInfo = NULL;
 
-	DBGLOG(HAL, INFO, "driver own INT\n");
+	DBGLOG(HAL, TRACE, "driver own INT\n");
 
 	prGlueInfo = (struct GLUE_INFO *)dev_instance;
 
-	if (prGlueInfo)
+	if (prGlueInfo) {
+		ktime_get_ts64(&prGlueInfo->u4DrvOwnIntTick);
 		set_bit(GLUE_FLAG_DRV_OWN_INT_BIT, &prGlueInfo->ulFlag);
+	} else {
+		DBGLOG(HAL, WARN, "NULL prGlueInfo.\n");
+		return IRQ_NONE;
+	}
 
 	return IRQ_HANDLED;
 }
@@ -567,42 +572,74 @@ static pci_ers_result_t mtk_pci_error_detected(struct pci_dev *pdev,
 	pci_channel_state_t state)
 {
 	pci_ers_result_t res = PCI_ERS_RESULT_NONE;
+	uint32_t dump = 0;
 	u_int8_t fgNeedReset = FALSE;
 
-	DBGLOG(HAL, INFO, "mtk_pci_error_detected state: %d, resetting: %d\n",
-		state, kalIsResetting());
+	DBGLOG(HAL, INFO,
+		"mtk_pci_error_detected state: %d, resetting: %d %d\n",
+		state, g_AERRstTriggered, kalIsResetting());
 
 	if (!pci_is_enabled(pdev)) {
 		DBGLOG(HAL, INFO, "pcie is disable\n");
 		goto exit;
 	}
 
-	if (state == pci_channel_io_normal) {
 #if IS_ENABLED(CFG_MTK_WIFI_PCIE_SUPPORT)
-		u32 ret = mtk_pcie_dump_link_info(0);
+	dump = mtk_pcie_dump_link_info(0);
+#endif
+
+	if (g_AERRstTriggered || kalIsResetting())
+		goto exit;
+
+	if (state == pci_channel_io_normal) {
+		uint16_t vnd_id = 0;
 
 		/* bit[6]: Completion timeout status */
-		if (ret & BIT(6))
+		if (dump & BIT(6)) {
 			fgNeedReset = TRUE;
-#endif
-		DBGLOG(HAL, INFO, "state is pci_channel_io_normal\n");
-		goto exit;
-	}
-
-	fgIsBusAccessFailed = TRUE;
-	fgNeedReset = TRUE;
-	pci_disable_device(pdev);
+			pci_read_config_word(pdev, PCI_VENDOR_ID, &vnd_id);
+			if (vnd_id == 0) {
+				DBGLOG(HAL, WARN, "PCIE link down\n");
+				fgIsBusAccessFailed = TRUE;
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
-	fgTriggerDebugSop = TRUE;
+				fgTriggerDebugSop = TRUE;
 #endif
+			} else {
+#if CFG_MTK_WIFI_AER_L05_RESET
+				g_AERL05Rst = TRUE;
+#endif
+			}
+		/* bit[7]: RxErr */
+		} else if (dump & BIT(7)) {
+			/* block PCIe access */
+#if IS_ENABLED(CFG_MTK_WIFI_PCIE_SUPPORT)
+			mtk_pcie_disable_data_trans(0);
+#endif
+			fgNeedReset = TRUE;
+			fgIsBusAccessFailed = TRUE;
+#if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
+			fgTriggerDebugSop = TRUE;
+#endif
+		}
+	} else {
+		pci_disable_device(pdev);
+		fgNeedReset = TRUE;
+		fgIsBusAccessFailed = TRUE;
+#if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
+		fgTriggerDebugSop = TRUE;
+#endif
+	}
 
 exit:
 	if (fgNeedReset) {
-		if (kalIsResetting())
+		if (g_AERRstTriggered || kalIsResetting())
 			res = PCI_ERS_RESULT_CAN_RECOVER;
 		else
 			res = PCI_ERS_RESULT_NEED_RESET;
+
+		g_AERRstTriggered = TRUE;
 	}
+
 	return res;
 }
 
@@ -610,10 +647,15 @@ static pci_ers_result_t mtk_pci_error_slot_reset(struct pci_dev *pdev)
 {
 #define AER_RST_STR		"Whole chip reset by AER"
 
-	DBGLOG(HAL, INFO, "mtk_pci_error_slot_reset, resetting: %d\n",
-		kalIsResetting());
+	struct GLUE_INFO *prGlueInfo = g_prGlueInfo;
 
-	if (!kalIsResetting()) {
+	DBGLOG(HAL, INFO, "mtk_pci_error_slot_reset, L05_rst: %d\n",
+		g_AERL05Rst);
+
+	if (g_AERL05Rst) {
+		GL_USER_DEFINE_RESET_TRIGGER(prGlueInfo->prAdapter,
+			RST_AER, RST_FLAG_WF_RESET);
+	} else {
 		glSetRstReasonString(AER_RST_STR);
 		glResetWholeChipResetTrigger(AER_RST_STR);
 	}
@@ -936,6 +978,8 @@ static int mtk_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
 	fgTriggerDebugSop = FALSE;
 #endif
+	g_AERRstTriggered = FALSE;
+	g_AERL05Rst = FALSE;
 	pci_set_master(pdev);
 
 #if IS_ENABLED(CFG_MTK_WIFI_PCIE_MSI_SUPPORT)
@@ -1076,16 +1120,23 @@ static void mtk_pci_remove(struct pci_dev *pdev)
 
 static int mtk_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
+	struct GLUE_INFO *prGlueInfo = NULL;
+
 #if (CFG_DEVICE_SUSPEND_BY_MOBILE == 1)
 	struct device *dev = &pdev->dev;
 
+	prGlueInfo = g_prGlueInfo;
+	if (!prGlueInfo) {
+		DBGLOG(HAL, ERROR, "prGlueInfo is NULL!\n");
+		return -1;
+	}
+
+	prGlueInfo->fgIsInSuspend = TRUE;
 	dev->power.driver_flags = DPM_FLAG_SMART_SUSPEND;
 	dev->power.runtime_status = RPM_SUSPENDED;
 	pdev->skip_bus_pm = true;
 	return 0;
 #else
-
-	struct GLUE_INFO *prGlueInfo = NULL;
 	struct BUS_INFO *prBusInfo;
 	uint32_t count = 0;
 	int wait = 0;
@@ -1213,10 +1264,18 @@ static int mtk_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 
 int mtk_pci_resume(struct pci_dev *pdev)
 {
+	struct GLUE_INFO *prGlueInfo = NULL;
+
 #if (CFG_DEVICE_SUSPEND_BY_MOBILE == 1)
+	prGlueInfo = g_prGlueInfo;
+	if (!prGlueInfo) {
+		DBGLOG(HAL, ERROR, "prGlueInfo is NULL!\n");
+		return -1;
+	}
+
+	prGlueInfo->fgIsInSuspend = FALSE;
 	return 0;
 #else
-	struct GLUE_INFO *prGlueInfo = NULL;
 	struct BUS_INFO *prBusInfo;
 
 	DBGLOG(HAL, STATE, "mtk_pci_resume()\n");
@@ -1295,6 +1354,10 @@ uint32_t glRegisterBus(probe_card pfProbe, remove_card pfRemove)
 	if (platform_driver_register(&mtk_axi_driver))
 		DBGLOG(HAL, ERROR, "platform_driver_register fail\n");
 
+#if IS_ENABLED(CFG_MTK_WIFI_PCIE_SUPPORT)
+	mtk_pcie_remove_port(0);
+#endif
+
 	return ret;
 }
 
@@ -1336,11 +1399,12 @@ static void glPopulateMemOps(struct mt66xx_chip_info *prChipInfo,
 	prMemOps->freeDesc = halZeroCopyPathFreeDesc;
 	prMemOps->freeExtBuf = halZeroCopyPathFreeDesc;
 	prMemOps->freeBuf = halZeroCopyPathFreeBuf;
+	prMemOps->allocRxEvtBuf = halZeroCopyPathAllocRxBuf;
 #if CFG_SUPPORT_RX_PAGE_POOL
-	prMemOps->allocRxBuf = halZeroCopyPathAllocPagePoolRxBuf;
+	prMemOps->allocRxDataBuf = halZeroCopyPathAllocPagePoolRxBuf;
 	prMemOps->freePacket = halZeroCopyPathFreePagePoolPacket;
 #else
-	prMemOps->allocRxBuf = halZeroCopyPathAllocRxBuf;
+	prMemOps->allocRxDataBuf = halZeroCopyPathAllocRxBuf;
 	prMemOps->freePacket = halZeroCopyPathFreePacket;
 #endif /* CFG_SUPPORT_RX_PAGE_POOL */
 #if CFG_MTK_WIFI_SW_EMI_RING
@@ -1358,8 +1422,10 @@ static void glPopulateMemOps(struct mt66xx_chip_info *prChipInfo,
 		prMemOps->allocExtBuf = halCopyPathAllocExtBuf;
 		prMemOps->allocTxCmdBuf = halCopyPathAllocTxCmdBuf;
 		prMemOps->allocTxDataBuf = halCopyPathAllocTxDataBuf;
+		prMemOps->allocRxEvtBuf = halCopyPathAllocRxBuf;
 		prMemOps->allocRuntimeMem = NULL;
 		prMemOps->copyCmd = halCopyPathCopyCmd;
+		prMemOps->copyEvent = halCopyPathCopyEvent;
 		prMemOps->copyTxData = halCopyPathCopyTxData;
 		prMemOps->mapTxBuf = NULL;
 		prMemOps->unmapTxBuf = NULL;
@@ -1367,27 +1433,22 @@ static void glPopulateMemOps(struct mt66xx_chip_info *prChipInfo,
 		prMemOps->freeExtBuf = halCopyPathFreeExtBuf;
 		prMemOps->freeBuf = NULL;
 		prMemOps->dumpTx = halCopyPathDumpTx;
-		prMemOps->dumpRx = halCopyPathDumpRx;
 
-#if (CFG_SUPPORT_RX_ZERO_COPY == 0)
-		prMemOps->allocRxBuf = halCopyPathAllocRxBuf;
-		prMemOps->copyRxData = halCopyPathCopyRxData;
-		prMemOps->copyEvent = halCopyPathCopyEvent;
-		prMemOps->mapRxBuf = NULL;
-		prMemOps->unmapRxBuf = NULL;
-		prMemOps->freePacket = NULL;
+#if (CFG_SUPPORT_RX_ZERO_COPY == 1)
+		prMemOps->dumpRx = halZeroCopyPathDumpRx;
+#else
+		glUpdateRxCopyMemOps(prMemOps)
 #endif /* CFG_SUPPORT_RX_ZERO_COPY == 1 */
 	}
 }
 
 void glUpdateRxCopyMemOps(struct HIF_MEM_OPS *prMemOps)
 {
-	prMemOps->allocRxBuf = halCopyPathAllocRxBuf;
 	prMemOps->copyRxData = halCopyPathCopyRxData;
-	prMemOps->copyEvent = halCopyPathCopyEvent;
 	prMemOps->mapRxBuf = NULL;
 	prMemOps->unmapRxBuf = NULL;
 	prMemOps->freePacket = NULL;
+	prMemOps->dumpRx = halCopyPathDumpRx;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -2081,16 +2142,17 @@ void halPcieHwControlVote(
 
 #if IS_ENABLED(CFG_MTK_WIFI_PCIE_SUPPORT)
 	/* vote to enable/disable hw mode */
-	err = mtk_pcie_hw_control_vote(0, voteResult, 1);
+	if (prAdapter->prGlueInfo->fgIsSuspended) {
+		err = mtk_pcie_hw_control_vote(0, voteResult, 1);
+		prAdapter->prGlueInfo->fgIsSuspended = FALSE;
+	}
+
 	if (err) {
 		DBGLOG(HAL, ERROR,
 			"hw control mode err[%d]\n", err);
 		fgIsBusAccessFailed = TRUE;
 		GL_DEFAULT_RESET_TRIGGER(prAdapter,
 			RST_PCIE_NOT_READY);
-	} else {
-		if (!voteResult)
-			mtk_pcie_dump_link_info(0);
 	}
 #endif
 	KAL_RELEASE_MUTEX(prAdapter, MUTEX_WF_VOTE);

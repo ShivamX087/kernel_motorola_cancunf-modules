@@ -65,6 +65,7 @@
 #ifdef MT6639
 #include "coda/mt6639/wf_wfdma_mcu_dma0.h"
 #endif
+#include "conn_dbg.h"
 
 /*******************************************************************************
  *                              C O N S T A N T S
@@ -1601,7 +1602,6 @@ exit:
 }
 #endif
 
-#if 0
 /*----------------------------------------------------------------------------*/
 /*!
  * @brief This function is used to generate CRC32 checksum
@@ -1676,7 +1676,6 @@ uint32_t wlanCRC32(uint8_t *buf, uint32_t len)
 
 	return ~crc32;
 }
-#endif
 
 uint32_t wlanGetHarvardTailerInfo(struct ADAPTER
 	*prAdapter, void *prFwBuffer, uint32_t u4FwSize,
@@ -2021,6 +2020,8 @@ uint32_t wlanDownloadFW(struct ADAPTER *prAdapter)
 		rStatus = prFwDlOps->downloadPatch(prAdapter);
 		if (rStatus != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, "Patch Download fail\n");
+			conn_dbg_add_log(CONN_DBG_LOG_TYPE_HW_ERR,
+				"Patch Download fail\n");
 			goto exit;
 		}
 	}
@@ -2060,6 +2061,8 @@ uint32_t wlanDownloadFW(struct ADAPTER *prAdapter)
 		rStatus = prFwDlOps->phyAction(prAdapter);
 		if (rStatus != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, "phyAction fail\n");
+			conn_dbg_add_log(CONN_DBG_LOG_TYPE_HW_ERR,
+				"phyAction fail\n");
 			goto exit;
 		}
 	}
@@ -2195,11 +2198,14 @@ uint32_t fwDlGetFwdlInfo(struct ADAPTER *prAdapter,
 	struct WIFI_VER_INFO *prVerInfo = &prAdapter->rVerInfo;
 	struct FWDL_OPS_T *prFwDlOps;
 	uint32_t u4Offset = 0;
-	uint8_t aucBuf[32] = {0}, aucDate[32] = {0};
 	struct mt66xx_chip_info *prChipInfo = prAdapter->chip_info;
+#if !CFG_WLAN_LK_FWDL_SUPPORT
+	uint8_t aucBuf[32] = {0}, aucDate[32] = {0};
+#endif
 
 	prFwDlOps = prAdapter->chip_info->fw_dl_ops;
 
+#if !CFG_WLAN_LK_FWDL_SUPPORT
 	kalSnprintf(aucBuf, sizeof(aucBuf), "%4s", prVerInfo->aucFwBranchInfo);
 	kalSnprintf(aucDate, sizeof(aucDate), "%16s", prVerInfo->aucFwDateCode);
 
@@ -2210,7 +2216,7 @@ uint32_t fwDlGetFwdlInfo(struct ADAPTER *prAdapter,
 			(uint32_t)(prVerInfo->u2FwOwnVersion >> 8),
 			(uint32_t)(prVerInfo->u2FwOwnVersion & BITS(0, 7)),
 			prVerInfo->ucFwBuildNumber, aucDate);
-
+#endif
 	if (prFwDlOps->getFwDlInfo)
 		u4Offset += prFwDlOps->getFwDlInfo(prAdapter,
 						   pcBuf + u4Offset,
@@ -2225,6 +2231,7 @@ uint32_t fwDlGetFwdlInfo(struct ADAPTER *prAdapter,
 #endif
 	}
 
+#if !CFG_WLAN_LK_FWDL_SUPPORT
 	kalSnprintf(aucBuf, sizeof(aucBuf), "%4s",
 			prVerInfo->rPatchHeader.aucPlatform);
 	kalSnprintf(aucDate, sizeof(aucDate), "%16s",
@@ -2240,6 +2247,7 @@ uint32_t fwDlGetFwdlInfo(struct ADAPTER *prAdapter,
 			"Drv version %u.%u[DEC]\n",
 			(uint32_t)(prVerInfo->u2FwPeerVersion >> 8),
 			(uint32_t)(prVerInfo->u2FwPeerVersion & BITS(0, 7)));
+#endif
 	return u4Offset;
 }
 
@@ -2303,24 +2311,14 @@ uint32_t wlanReadRamCodeReleaseManifest(uint8_t *pucManifestBuffer,
 		uint32_t *pu4ManifestSize, uint32_t u4BufferMaxSize)
 {
 	struct mt66xx_chip_info *prChipInfo = NULL;
-	uint32_t u4FwVerOffsetAddr = 0;
 	uint32_t u4FwVerOffset = 0;
 	uint32_t u4CopySize = 0;
 
 	*pu4ManifestSize = 0;
 	kalMemZero(pucManifestBuffer, u4BufferMaxSize);
 
-	u4FwVerOffsetAddr = kalGetFwVerOffsetAddr();
-	if (u4FwVerOffsetAddr == 0)
-		return WLAN_STATUS_NOT_ACCEPTED;
-
+	u4FwVerOffset = kalGetFwVerOffset();
 	glGetChipInfo((void **)&prChipInfo);
-	if (emi_mem_read(prChipInfo, u4FwVerOffsetAddr, &u4FwVerOffset,
-		sizeof(u4FwVerOffset))) {
-		DBGLOG(INIT, WARN, "emi_mem_read %x failed.\n",
-			u4FwVerOffsetAddr);
-		return WLAN_STATUS_FAILURE;
-	}
 
 	if (u4FwVerOffset) {
 		u4CopySize = (u4BufferMaxSize < FW_VERSION_MAX_LEN) ?

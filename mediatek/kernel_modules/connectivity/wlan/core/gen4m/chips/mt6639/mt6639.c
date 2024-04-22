@@ -328,7 +328,8 @@ struct wfdma_group_info mt6639_wfmda_host_tx_group[] = {
 
 struct wfdma_group_info mt6639_wfmda_host_rx_group[] = {
 	{"P0R4:AP DATA0", WF_WFDMA_HOST_DMA0_WPDMA_RX_RING4_CTRL0_ADDR},
-	{"P0R6:AP EVT/TDONE", WF_WFDMA_HOST_DMA0_WPDMA_RX_RING6_CTRL0_ADDR},
+	{"P0R6:AP EVT/TDONE", WF_WFDMA_HOST_DMA0_WPDMA_RX_RING6_CTRL0_ADDR,
+	 true},
 	{"P0R5:AP DATA1", WF_WFDMA_HOST_DMA0_WPDMA_RX_RING5_CTRL0_ADDR},
 	{"P0R7:AP ICS", WF_WFDMA_HOST_DMA0_WPDMA_RX_RING7_CTRL0_ADDR},
 	{"P0R8:MD DATA0", WF_WFDMA_HOST_DMA0_WPDMA_RX_RING8_CTRL0_ADDR},
@@ -442,7 +443,7 @@ struct pcie_msi_layout mt6639_pcie_msi_layout[] = {
 	{"reserved", NULL, NULL, NONE_INT, 0},
 	{"reserved", NULL, NULL, NONE_INT, 0},
 	{"drv_own_host_timeout_irq", pcie_drv_own_top_handler,
-		pcie_drv_own_thread_handler, AP_INT, 0},
+		pcie_drv_own_thread_handler, AP_DRV_OWN, 0},
 	{"drv_own_md_timeout_irq", mtk_md_dummy_pci_interrupt,
 				 NULL, MDDP_INT, 0},
 	{"fw_log_irq", pcie_fw_log_top_handler,
@@ -468,7 +469,9 @@ struct BUS_INFO mt6639_bus_info = {
 	 WF_WFDMA_HOST_DMA0_HOST_INT_STA_tx_done_int_sts_2_MASK |
 	 WF_WFDMA_HOST_DMA0_HOST_INT_STA_tx_done_int_sts_3_MASK |
 #endif /* CFG_SUPPORT_DISABLE_DATA_DDONE_INTR == 0 */
+#if (CFG_SUPPORT_DISABLE_CMD_DDONE_INTR == 0)
 	 WF_WFDMA_HOST_DMA0_HOST_INT_STA_tx_done_int_sts_15_MASK |
+#endif /* CFG_SUPPORT_DISABLE_CMD_DDONE_INTR == 0 */
 #if (WFDMA_AP_MSI_NUM == 1)
 	 WF_WFDMA_HOST_DMA0_HOST_INT_STA_tx_done_int_sts_16_MASK |
 #endif
@@ -530,7 +533,11 @@ struct BUS_INFO mt6639_bus_info = {
 	.tx_ring3_data_idx = 3,
 	.rx_data_ring_num = 2,
 	.rx_evt_ring_num = 2,
+#if (CFG_SUPPORT_HOST_OFFLOAD == 1)
+	.rx_data_ring_size = 4095,
+#else
 	.rx_data_ring_size = 3072,
+#endif
 	.rx_evt_ring_size = 128,
 	.rx_data_ring_prealloc_size = 1024,
 	.fw_own_clear_addr = CONNAC3X_BN0_IRQ_STAT_ADDR,
@@ -714,6 +721,7 @@ struct CHIP_DBG_OPS mt6639_DebugOps = {
 	.dumpBusHangCr = mt6639_DumpBusHangCr,
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
 	.dumpPcieCr = mt6639_dumpPcieReg,
+	.checkDumpViaBt = mt6639_CheckDumpViaBt,
 #endif
 #endif
 #if CFG_SUPPORT_LINK_QUALITY_MONITOR
@@ -768,6 +776,7 @@ static struct FW_LOG_OPS mt6639_fw_log_emi_ops = {
 	.deinit = fw_log_emi_deinit,
 	.start = fw_log_emi_start,
 	.stop = fw_log_emi_stop,
+	.set_enabled = fw_log_emi_set_enabled,
 	.handler = fw_log_emi_handler,
 };
 #endif
@@ -1224,9 +1233,11 @@ static void mt6639ProcessTxInterrupt(
 		halWpdmaProcessCmdDmaDone(
 			prAdapter->prGlueInfo, TX_RING_FWDL);
 
+#if (CFG_SUPPORT_DISABLE_CMD_DDONE_INTR == 0)
 	if (u4Sta & WF_WFDMA_HOST_DMA0_HOST_INT_STA_tx_done_int_sts_15_MASK)
 		halWpdmaProcessCmdDmaDone(
 			prAdapter->prGlueInfo, TX_RING_CMD);
+#endif /* CFG_SUPPORT_DISABLE_CMD_DDONE_INTR == 0 */
 
 #if (CFG_SUPPORT_DISABLE_DATA_DDONE_INTR == 0)
 	if (u4Sta & WF_WFDMA_HOST_DMA0_HOST_INT_STA_tx_done_int_sts_0_MASK) {
@@ -1471,7 +1482,7 @@ static void mt6639ReadIntStatusByMsi(struct ADAPTER *prAdapter,
 
 	if (KAL_TEST_BIT(PCIE_MSI_TX_FREE_DONE, prMsiInfo->ulEnBits)) {
 		*pu4IntStatus |= WHISR_RX0_DONE_INT;
-		u4WrValue |=
+		u4Value |=
 			WF_WFDMA_HOST_DMA0_HOST_INT_STA_rx_done_int_sts_7_MASK;
 	}
 
@@ -1489,15 +1500,17 @@ static void mt6639ReadIntStatusByMsi(struct ADAPTER *prAdapter,
 
 	if (KAL_TEST_BIT(PCIE_MSI_EVENT, prMsiInfo->ulEnBits)) {
 		*pu4IntStatus |= WHISR_RX0_DONE_INT;
-		u4WrValue |=
+		u4Value |=
 			WF_WFDMA_HOST_DMA0_HOST_INT_STA_rx_done_int_sts_6_MASK;
 	}
 
+#if (CFG_SUPPORT_DISABLE_CMD_DDONE_INTR == 0)
 	if (KAL_TEST_BIT(PCIE_MSI_CMD, prMsiInfo->ulEnBits)) {
 		*pu4IntStatus |= WHISR_TX_DONE_INT;
 		u4WrValue |=
 			WF_WFDMA_HOST_DMA0_HOST_INT_STA_tx_done_int_sts_15_MASK;
 	}
+#endif /* CFG_SUPPORT_DISABLE_CMD_DDONE_INTR == 0 */
 
 	if (KAL_TEST_BIT(PCIE_MSI_LUMP, prMsiInfo->ulEnBits)) {
 		*pu4IntStatus |= WHISR_D2H_SW_INT;
@@ -1593,9 +1606,11 @@ static void mt6639ConfigIntMask(struct GLUE_INFO *prGlueInfo,
 		WF_WFDMA_HOST_DMA0_HOST_INT_ENA_HOST_TX_DONE_INT_ENA0_MASK |
 		WF_WFDMA_HOST_DMA0_HOST_INT_ENA_HOST_TX_DONE_INT_ENA1_MASK |
 		WF_WFDMA_HOST_DMA0_HOST_INT_ENA_HOST_TX_DONE_INT_ENA2_MASK |
-		WF_WFDMA_HOST_DMA0_HOST_INT_ENA_HOST_TX_DONE_INT_ENA3_MASK
+		WF_WFDMA_HOST_DMA0_HOST_INT_ENA_HOST_TX_DONE_INT_ENA3_MASK |
 #endif /* CFG_SUPPORT_DISABLE_DATA_DDONE_INTR == 0 */
+#if (CFG_SUPPORT_DISABLE_CMD_DDONE_INTR == 0)
 		WF_WFDMA_HOST_DMA0_HOST_INT_ENA_HOST_TX_DONE_INT_ENA15_MASK |
+#endif /* CFG_SUPPORT_DISABLE_CMD_DDONE_INTR */
 #if (WFDMA_AP_MSI_NUM == 1)
 		WF_WFDMA_HOST_DMA0_HOST_INT_ENA_HOST_TX_DONE_INT_ENA16_MASK |
 #endif
@@ -1647,7 +1662,7 @@ static void mt6639WpdmaMsiConfig(struct ADAPTER *prAdapter)
 	/* No need to read int status if msi num is 8 */
 	prAdapter->rWifiVar.u4HifIstLoopCount = 1;
 
-	u4Value = 0x40800018;
+	u4Value = 0x4080003C;
 	HAL_MCR_WR(prAdapter,
 		   WF_WFDMA_EXT_WRAP_CSR_WFDMA_MSI_CONFIG_ADDR,
 		   u4Value);
@@ -1944,19 +1959,14 @@ static u_int8_t mt6639SetL1ssEnable(struct ADAPTER *prAdapter,
 {
 	struct mt66xx_chip_info *prChipInfo;
 	struct BUS_INFO *prBusInfo;
-	unsigned long flags = 0;
 
 	prChipInfo = prAdapter->chip_info;
 	prBusInfo = prChipInfo->bus_info;
-
-	spin_lock_irqsave(&rPCIELock, flags);
 
 	if (role == WIFI_ROLE)
 		prChipInfo->bus_info->fgWifiEnL1_2 = fgEn;
 	else if (role == MD_ROLE)
 		prChipInfo->bus_info->fgMDEnL1_2 = fgEn;
-
-	spin_unlock_irqrestore(&rPCIELock, flags);
 
 	DBGLOG(HAL, TRACE, "fgWifiEnL1_2 = %d, fgMDEnL1_2=%d\n",
 		prChipInfo->bus_info->fgWifiEnL1_2,
@@ -1972,22 +1982,38 @@ static void mt6639ConfigPcieAspm(struct GLUE_INFO *prGlueInfo,
 				u_int8_t fgEn, u_int enable_role)
 {
 	struct GL_HIF_INFO *prHifInfo = &prGlueInfo->rHifInfo;
-	uint32_t value = 0, delay = 0;
+	uint32_t value = 0, delay = 0, value1 = 0;
 	struct mt66xx_chip_info *prChipInfo;
 	struct BUS_INFO *prBusInfo;
 	u_int8_t enableL1ss = FALSE;
+	u_int8_t isL0Status = FALSE;
+	unsigned long flags = 0;
+
+	if (pcie_vir_addr == NULL)
+		return;
 
 	prChipInfo = prGlueInfo->prAdapter->chip_info;
 	prBusInfo = prChipInfo->bus_info;
 
+	spin_lock_irqsave(&rPCIELock, flags);
 	enableL1ss =
 		mt6639SetL1ssEnable(prGlueInfo->prAdapter, enable_role, fgEn);
 
 	if (fgEn) {
 		/* Restore original setting*/
 		if (enableL1ss) {
-			if (pcie_vir_addr)
+			value = readl(pcie_vir_addr + 0x194);
+			value1 = readl(pcie_vir_addr + 0x150);
+			isL0Status = ((value1 & BITS(24, 28)) >> 24) == 0x10;
+			if ((value & BITS(0, 11)) == 0xc0f ||
+				((value & BITS(0, 11)) == 0x20f && isL0Status)) {
 				writel(0xe0f, (pcie_vir_addr + 0x194));
+			} else {
+				DBGLOG(HAL, INFO,
+					"enable isL0Status=%d, value=0x%08x, value1=0x%08x\n",
+					isL0Status, value, value1);
+				goto exit;
+			}
 
 			delay += 10;
 			udelay(10);
@@ -1995,12 +2021,15 @@ static void mt6639ConfigPcieAspm(struct GLUE_INFO *prGlueInfo,
 			/* Polling RC 0x112f0150[28:24] until =0x10 */
 			while (1) {
 				value = readl(pcie_vir_addr + 0x150);
+
 				if (((value & BITS(24, 28))
 					>> 24) == 0x10)
 					break;
 
-				if (delay >= POLLING_TIMEOUT)
-					return;
+				if (delay >= POLLING_TIMEOUT) {
+					DBGLOG(HAL, INFO, "Enable L1.2 POLLING_TIMEOUT\n");
+					goto exit;
+				}
 
 				delay += 10;
 				udelay(10);
@@ -2010,8 +2039,8 @@ static void mt6639ConfigPcieAspm(struct GLUE_INFO *prGlueInfo,
 				0x74030194, 0xf);
 			HAL_MCR_RD(prGlueInfo->prAdapter,
 				0x74030194, &value);
-			if (pcie_vir_addr)
-				writel(0xf, (pcie_vir_addr + 0x194));
+			writel(0xf, (pcie_vir_addr + 0x194));
+
 
 			DBGLOG(HAL, TRACE, "Enable aspm L1.1/L1.2..\n");
 		} else {
@@ -2022,8 +2051,18 @@ static void mt6639ConfigPcieAspm(struct GLUE_INFO *prGlueInfo,
 		 *	Backup original setting then
 		 *	disable L1.1, L1.2 and set LTR to 0
 		 */
-		if (pcie_vir_addr)
-			writel(0x20f, (pcie_vir_addr + 0x194));
+			value = readl(pcie_vir_addr + 0x194);
+			value1 = readl(pcie_vir_addr + 0x150);
+			isL0Status = ((value1 & BITS(24, 28)) >> 24) == 0x10;
+			if ((value & BITS(0, 11)) == 0xf ||
+				((value & BITS(0, 11)) == 0xe0f && isL0Status)) {
+				writel(0x20f, (pcie_vir_addr + 0x194));
+			} else {
+				DBGLOG(HAL, INFO,
+					"disable isL0Status=%d, value=0x%08x, value1=0x%08x\n",
+					isL0Status, value, value1);
+				goto exit;
+			}
 
 		delay += 10;
 		udelay(10);
@@ -2031,12 +2070,15 @@ static void mt6639ConfigPcieAspm(struct GLUE_INFO *prGlueInfo,
 		/* Polling RC 0x112f0150[28:24] until =0x10 */
 		while (1) {
 			value = readl(pcie_vir_addr + 0x150);
+
 			if (((value & BITS(24, 28))
 				>> 24) == 0x10)
 				break;
 
-			if (delay >= POLLING_TIMEOUT)
-				return;
+			if (delay >= POLLING_TIMEOUT) {
+				DBGLOG(HAL, INFO, "Disable L1.2 POLLING_TIMEOUT\n");
+				goto exit;
+			}
 
 			delay += 10;
 			udelay(10);
@@ -2044,14 +2086,16 @@ static void mt6639ConfigPcieAspm(struct GLUE_INFO *prGlueInfo,
 
 		HAL_MCR_WR(prGlueInfo->prAdapter, 0x74030194, 0xc0f);
 		HAL_MCR_RD(prGlueInfo->prAdapter, 0x74030194, &value);
-		if (pcie_vir_addr)
-			writel(0xc0f, (pcie_vir_addr + 0x194));
+		writel(0xc0f, (pcie_vir_addr + 0x194));
 
 		if (prHifInfo->eCurPcieState == PCIE_STATE_L0)
 			DBGLOG(HAL, TRACE, "Disable aspm L1..\n");
 		else
 			DBGLOG(HAL, TRACE, "Disable aspm L1.1/L1.2..\n");
 	}
+
+exit:
+	spin_unlock_irqrestore(&rPCIELock, flags);
 }
 
 static void mt6639UpdatePcieAspm(struct GLUE_INFO *prGlueInfo, u_int8_t fgEn)
@@ -2110,8 +2154,9 @@ static u_int8_t mt6639DumpPcieDateFlowStatus(struct GLUE_INFO *prGlueInfo)
 		pci_read_config_dword(pci_dev, 0x0, &u4RegVal[0]);
 		if (u4RegVal[0] == 0) {
 			DBGLOG(HAL, INFO,
-				"PCIE link down 0x0=0x%08x\n",
-				u4RegVal[0]);
+				"PCIE link down 0x0=0x%08x\n", u4RegVal[0]);
+			/* block pcie to prevent access */
+			mtk_pcie_disable_data_trans(0);
 			return FALSE;
 		}
 
@@ -2119,8 +2164,7 @@ static u_int8_t mt6639DumpPcieDateFlowStatus(struct GLUE_INFO *prGlueInfo)
 		pci_read_config_dword(pci_dev, 0x488, &u4RegVal[1]);
 		if (u4RegVal[1] != 0xC0093301)
 			DBGLOG(HAL, INFO,
-				"state mismatch 0x488=0x%08x\n",
-				u4RegVal[1]);
+				"state mismatch 0x488=0x%08x\n", u4RegVal[1]);
 	}
 
 	/*2. cb_infra/cbtop status*/
@@ -2239,6 +2283,17 @@ static u_int8_t mt6639DumpPcieDateFlowStatus(struct GLUE_INFO *prGlueInfo)
 	if (u4RegVal[15] != 0x0) {
 		DBGLOG(HAL, INFO, "0x1E7154=0x%08x\n",
 			u4RegVal[15]);
+		return FALSE;
+	}
+
+	if ((u4RegVal[6] & BITS(12, 13)) == BITS(12, 13)) {
+		DBGLOG(HAL, INFO, "MCU off, 0x1F5014=0x%08x\n", u4RegVal[6]);
+		/* block pcie to prevent access */
+		mtk_pcie_disable_data_trans(0);
+		fgIsMcuOff = TRUE;
+#if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
+		fgTriggerDebugSop = TRUE;
+#endif
 		return FALSE;
 	}
 
@@ -2424,6 +2479,9 @@ static uint32_t mt6639_ccif_get_fw_log_read_pointer(struct ADAPTER *ad,
 
 static int32_t mt6639_ccif_trigger_fw_assert(struct ADAPTER *ad)
 {
+	HAL_MCR_WR(ad,
+		CONN_BUS_CR_VON_CONN_INFRA_PCIE2AP_REMAP_WF_1_BA_ADDR,
+		0x18051803);
 	HAL_MCR_WR(ad,
 		AP2WF_CONN_INFRA_ON_CCIF4_AP2WF_PCCIF_TCHNUM_ADDR,
 		SW_INT_SUBSYS_RESET);
@@ -2657,6 +2715,10 @@ static uint32_t mt6639_mcu_init(struct ADAPTER *ad)
 		goto dump;
 #endif
 
+	HAL_MCR_WR(ad,
+		   CB_INFRA_SLP_CTRL_CB_INFRA_CRYPTO_TOP_MCU_OWN_SET_ADDR,
+		   BIT(0));
+
 	while (TRUE) {
 		if (u4PollingCnt >= 1000) {
 			DBGLOG(INIT, ERROR, "timeout.\n");
@@ -2697,24 +2759,96 @@ dump:
 		WARN_ON_ONCE(TRUE);
 		DBGLOG(INIT, ERROR, "u4Value: 0x%x\n",
 			u4Value);
-		mt6639DumpPcieDateFlowStatus(ad->prGlueInfo);
-		mt6639_dumpWfsyscpupcr(ad);
-		mt6639_dumpPcGprLog(ad);
-		mt6639_dumpN45CoreReg(ad);
-		mt6639_dumpWfTopReg(ad);
-		mt6639_dumpWfBusReg(ad);
 
 		HAL_MCR_WR(ad, 0x70003304, 0x06030138);
 		HAL_MCR_WR(ad, 0x70000244, 0x000f0000);
 		HAL_MCR_WR(ad, 0x70000244, 0x001f0000);
+		kalUdelay(10);
 		HAL_MCR_WR(ad, 0x70000244, 0x011f0000);
-		kalUdelay(1);
+		kalUdelay(10);
 		HAL_MCR_RD(ad, 0x70000248, &u4Value);
 		DBGLOG(INIT, INFO, "0x70000248: 0x%08x\n",
 			u4Value);
 		HAL_MCR_RD(ad, 0x70025030, &u4Value);
 		DBGLOG(INIT, INFO, "0x70025030: 0x%08x\n",
 			u4Value);
+
+		HAL_MCR_RD(ad, 0x70000240, &u4Value);
+		DBGLOG(INIT, INFO, "0x70000240: 0x%08x\n",
+			u4Value);
+		HAL_MCR_RD(ad, 0x70000244, &u4Value);
+		DBGLOG(INIT, INFO, "0x70000244: 0x%08x\n",
+			u4Value);
+		HAL_MCR_RD(ad, 0x70000248, &u4Value);
+		DBGLOG(INIT, INFO, "0x70000248: 0x%08x\n",
+			u4Value);
+		HAL_MCR_RD(ad, 0x7000024C, &u4Value);
+		DBGLOG(INIT, INFO, "0x7000024C: 0x%08x\n",
+			u4Value);
+		HAL_MCR_RD(ad, 0x70003300, &u4Value);
+		DBGLOG(INIT, INFO, "0x70003300: 0x%08x\n",
+			u4Value);
+		HAL_MCR_RD(ad, 0x70003304, &u4Value);
+		DBGLOG(INIT, INFO, "0x70003304: 0x%08x\n",
+			u4Value);
+		HAL_MCR_RD(ad, 0x70003100, &u4Value);
+		DBGLOG(INIT, INFO, "0x70003100: 0x%08x\n",
+			u4Value);
+
+		HAL_MCR_WR(ad, 0x70021008, 0x41B00000);
+		kalUdelay(100);
+		HAL_MCR_RD(ad, 0x70021030, &u4Value);
+		DBGLOG(INIT, INFO, "0x70021030: 0x%08x\n",
+			u4Value);
+		HAL_MCR_RD(ad, 0x70021034, &u4Value);
+		DBGLOG(INIT, INFO, "0x70021034: 0x%08x\n",
+			u4Value);
+
+		HAL_MCR_WR(ad, 0x70003304, 0x06030138);
+		HAL_MCR_WR(ad, 0x70000244, 0x000f0000);
+		HAL_MCR_WR(ad, 0x70000244, 0x001f0000);
+		kalUdelay(10);
+		HAL_MCR_WR(ad, 0x70000244, 0x011f0000);
+		kalUdelay(10);
+		HAL_MCR_RD(ad, 0x70000248, &u4Value);
+		DBGLOG(INIT, INFO, "0x70000248: 0x%08x\n",
+			u4Value);
+
+		HAL_MCR_RD(ad, 0x70026540, &u4Value);
+		u4Value &= ~BIT(3);
+		HAL_MCR_WR(ad, 0x70026540, u4Value);
+		HAL_MCR_WR(ad, 0x70026540, 0xBC);
+		kalMdelay(1);
+		HAL_MCR_RD(ad, 0x7002654C, &u4Value);
+		DBGLOG(INIT, INFO, "0x7002654C: 0x%08x\n",
+			u4Value);
+
+		HAL_MCR_WR(ad, 0x70003304, 0x06030138);
+		HAL_MCR_WR(ad, 0x70000244, 0x000f0000);
+		HAL_MCR_WR(ad, 0x70000244, 0x001f0000);
+		kalUdelay(10);
+		HAL_MCR_WR(ad, 0x70000244, 0x011f0000);
+		kalUdelay(10);
+		HAL_MCR_RD(ad, 0x70000248, &u4Value);
+		DBGLOG(INIT, INFO, "0x70000248: 0x%08x\n",
+			u4Value);
+
+		HAL_MCR_RD(ad, 0x70026540, &u4Value);
+		u4Value &= ~BIT(3);
+		HAL_MCR_WR(ad, 0x70026540, u4Value);
+		kalUdelay(150);
+		HAL_MCR_WR(ad, 0x70026540, 0x1C);
+		kalMdelay(1);
+		HAL_MCR_RD(ad, 0x7002654C, &u4Value);
+		DBGLOG(INIT, INFO, "0x7002654C: 0x%08x\n",
+			u4Value);
+
+		mt6639DumpPcieDateFlowStatus(ad->prGlueInfo);
+		mt6639_dumpWfsyscpupcr(ad);
+		mt6639_dumpPcGprLog(ad);
+		mt6639_dumpN45CoreReg(ad);
+		mt6639_dumpWfTopReg(ad);
+		mt6639_dumpWfBusReg(ad);
 	}
 
 exit:

@@ -1262,6 +1262,7 @@ void aisFsmStateInit_JOIN(struct ADAPTER *prAdapter,
 	/* 4 <2.1> sync. to firmware domain */
 	if (prStaRec->ucStaState == STA_STATE_1)
 		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
+	prStaRec->u2StatusCode = STATUS_CODE_AUTH_TIMEOUT;
 
 	/* 4 <3> Update ucAvailableAuthTypes which we can choice during SAA */
 	if (prAisBssInfo->eConnectionState == MEDIA_STATE_DISCONNECTED
@@ -2978,7 +2979,7 @@ void aisFsmQueryCandidates(struct ADAPTER *prAdapter, uint8_t ucBssIndex)
 		return;
 	}
 
-	if (!prBssDesc->fgQueriedCandidates) {
+	if (prBssDesc && !prBssDesc->fgQueriedCandidates) {
 		prBssDesc->fgQueriedCandidates = TRUE;
 
 		aisResetNeighborApList(prAdapter, ucBssIndex);
@@ -3759,11 +3760,13 @@ u_int8_t aisHandleTemporaryReject(struct ADAPTER *prAdapter,
 #if CFG_SUPPORT_802_11W
 	struct AIS_FSM_INFO *prAisFsmInfo;
 	struct AIS_SPECIFIC_BSS_INFO *prAisSpecificBssInfo;
+	struct ROAMING_INFO *prRoamingInfo;
 	uint8_t ucBssIndex = 0;
 
 	ucBssIndex = prStaRec->ucBssIndex;
 	prAisFsmInfo = aisGetAisFsmInfo(prAdapter, ucBssIndex);
 	prAisSpecificBssInfo = aisGetAisSpecBssInfo(prAdapter, ucBssIndex);
+	prRoamingInfo =	aisGetRoamingInfo(prAdapter, ucBssIndex);
 
 	if (prStaRec->u2StatusCode == STATUS_CODE_ASSOC_REJECTED_TEMPORARILY) {
 		/* record temporarily rejected AP for SA query */
@@ -3773,6 +3776,7 @@ u_int8_t aisHandleTemporaryReject(struct ADAPTER *prAdapter,
 			TU_TO_MSEC(prStaRec->u4assocComeBackTime);
 		/* Extend trial count during Beacon timeout retry*/
 		prAisFsmInfo->ucConnTrialCountLimit = 5;
+		prRoamingInfo->eReason = ROAMING_REASON_TEMP_REJECT;
 		DBGLOG(AIS, INFO, "reschedule a comeback timer %u msec\n",
 			TU_TO_MSEC(prStaRec->u4assocComeBackTime));
 		return true;
@@ -3911,12 +3915,6 @@ uint8_t aisHandleJoinFailure(struct ADAPTER *prAdapter,
 	aisTargetBssResetConnecting(prAdapter, prAisFsmInfo);
 	aisRestoreAllLink(prAdapter, prAisFsmInfo);
 
-	/* If AP reject STA temporarily when roaming, clear all link.
-	 * Thus, ap selection can choose same AP to retry.
-	 */
-	if (fgTempReject)
-		aisClearAllLink(prAisFsmInfo);
-
 	/* aisRestoreAllLink clears target bssdesc and starec if no connection,
 	 * DO NOT use prStaRec or aisGetTargetBssDesc after this point
 	 */
@@ -4041,6 +4039,10 @@ enum ENUM_AIS_STATE aisFsmJoinCompleteAction(struct ADAPTER *prAdapter,
 			prAisFsmInfo->ucConnTrialCount = 0;
 			prAisFsmInfo->ucIsStaRoaming = FALSE;
 
+#if ARP_MONITER_ENABLE
+			qmResetArpDetect(prAdapter, prStaRec->ucBssIndex);
+#endif
+
 			/* Completion of roaming */
 			if (prAisBssInfo->eConnectionState ==
 			    MEDIA_STATE_CONNECTED) {
@@ -4057,6 +4059,18 @@ enum ENUM_AIS_STATE aisFsmJoinCompleteAction(struct ADAPTER *prAdapter,
 							     prAisFsmInfo,
 							     prAssocRspSwRfb,
 							     prStaRec);
+
+				/* 4 <1.6> Indicate Connected Event to Host
+				 * immediately.
+				 */
+				/* Require BSSID, Association ID,
+				 * Beacon Interval
+				 */
+				/* .. from AIS_BSS_INFO_T */
+				aisIndicationOfMediaStateToHost(prAdapter,
+					MEDIA_STATE_CONNECTED,
+					FALSE,
+					ucBssIndex);
 #endif /* CFG_SUPPORT_ROAMING */
 			} else {
 				if (aisFsmIsInProcessPostpone(prAdapter,
@@ -4925,7 +4939,7 @@ void aisUpdateBssInfoForJOIN(struct ADAPTER *prAdapter,
 	prAisBssInfo->ucBMCWlanIndex = secPrivacySeekForBcEntry(
 				prAdapter, prAisBssInfo->ucBssIndex,
 				prAisBssInfo->aucOwnMacAddr,
-				STA_REC_INDEX_NOT_FOUND,
+				prStaRec->ucIndex,
 				CIPHER_SUITE_NONE, 0xFF);
 
 	nicUpdateBss(prAdapter, ucBssIndex);
@@ -5638,6 +5652,7 @@ void aisFsmRunEventJoinTimeout(struct ADAPTER *prAdapter,
 	OS_SYSTIME rCurrentTime;
 	uint8_t ucBssIndex = (uint8_t) ulParamPtr;
 	struct BSS_DESC *prBssDesc;
+	struct STA_RECORD *prStaRec;
 
 	DEBUGFUNC("aisFsmRunEventJoinTimeout()");
 
@@ -5653,13 +5668,15 @@ void aisFsmRunEventJoinTimeout(struct ADAPTER *prAdapter,
 	case AIS_STATE_JOIN:
 		DBGLOG(AIS, WARN, "EVENT- JOIN TIMEOUT\n");
 
+		prStaRec = aisGetTargetStaRec(prAdapter, ucBssIndex);
+		prStaRec->u2StatusCode = WLAN_STATUS_AUTH_TIMEOUT;
 		eNextState = aisHandleJoinFailure(prAdapter,
-				aisGetTargetStaRec(prAdapter, ucBssIndex),
+				prStaRec,
 				NULL, ucBssIndex);
 
+#if 0
 		/* 1. Do abort JOIN */
 		aisFsmStateAbort_JOIN(prAdapter, ucBssIndex);
-#if 0
 
 		/* 2. Increase Join Failure Count */
 		/* Support AP Selection */
@@ -6320,7 +6337,8 @@ aisDeauthXmitCompleteBss(struct ADAPTER *prAdapter,
 	prAisFsmInfo->encryptedDeauthIsInProcess = FALSE;
 #endif
 
-	cnmTimerStopTimer(prAdapter, &prAisFsmInfo->rDeauthDoneTimer);
+	if (rTxDoneStatus == TX_RESULT_SUCCESS)
+		cnmTimerStopTimer(prAdapter, &prAisFsmInfo->rDeauthDoneTimer);
 
 #if CFG_CHIP_RESET_SUPPORT && !CFG_WMT_RESET_API_SUPPORT
 	if (prAdapter->chip_info->fgIsSupportL0p5Reset) {
@@ -6361,6 +6379,31 @@ aisDeauthXmitComplete(struct ADAPTER *prAdapter,
 }
 
 #if CFG_SUPPORT_ROAMING
+
+void aisFsmEnableRssiMonitor(struct ADAPTER *prAdapter,
+	struct AIS_FSM_INFO *prAisFsmInfo, uint8_t ucEnable)
+{
+	struct PARAM_RSSI_MONITOR_T rRssi;
+	uint32_t rStatus;
+
+	kalMemCopy(&rRssi, &prAisFsmInfo->rRSSIMonitor,
+		sizeof(struct PARAM_RSSI_MONITOR_T));
+
+	rRssi.enable = ucEnable;
+	if (!ucEnable)
+		rRssi.max_rssi_value = rRssi.min_rssi_value = 0;
+
+	rStatus = wlanSendSetQueryCmd(prAdapter,
+			   CMD_ID_RSSI_MONITOR,
+			   TRUE,
+			   FALSE,
+			   FALSE,
+			   NULL,
+			   NULL,
+			   sizeof(struct PARAM_RSSI_MONITOR_T),
+			   (uint8_t *)&rRssi, NULL, 0);
+}
+
 /*----------------------------------------------------------------------------*/
 /*!
  * @brief This function will indicate an Event of "Looking for a candidate
@@ -6642,6 +6685,10 @@ void aisFsmRoamingDisconnectPrevAllAP(struct ADAPTER *prAdapter,
 {
 	uint8_t i;
 
+	/* Disable rssi monitor */
+	if (prAisFsmInfo->rRSSIMonitor.enable)
+		aisFsmEnableRssiMonitor(prAdapter, prAisFsmInfo, FALSE);
+
 	for (i = 0; i < MLD_LINK_MAX; i++) {
 		struct STA_RECORD *prStaRec =
 			aisGetLinkStaRec(prAisFsmInfo, i);
@@ -6704,13 +6751,6 @@ void aisUpdateBssInfoForRoamingAP(struct ADAPTER *prAdapter,
 
 	/* 4 <1.3> Activate current AP's STA_RECORD_T in Driver. */
 	cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_3);
-
-	/* 4 <1.6> Indicate Connected Event to Host immediately. */
-	/* Require BSSID, Association ID, Beacon Interval..
-	 * from AIS_BSS_INFO_T
-	 */
-	aisIndicationOfMediaStateToHost(prAdapter, MEDIA_STATE_CONNECTED,
-					FALSE, ucBssIndex);
 }				/* end of aisFsmRoamingUpdateBss() */
 
 void aisUpdateBssInfoForRoamingAllAP(struct ADAPTER *prAdapter,
@@ -6722,6 +6762,10 @@ void aisUpdateBssInfoForRoamingAllAP(struct ADAPTER *prAdapter,
 #if (CFG_SUPPORT_802_11BE_MLO == 1)
 	struct SW_RFB *prSwRfb;
 #endif
+
+	/* Enable rssi monitor */
+	if (prAisFsmInfo->rRSSIMonitor.enable)
+		aisFsmEnableRssiMonitor(prAdapter, prAisFsmInfo, TRUE);
 
 	for (i = 0; i < MLD_LINK_MAX; i++) {
 		struct STA_RECORD *prStaRec =
@@ -7497,11 +7541,10 @@ aisFuncTxMgmtFrame(struct ADAPTER *prAdapter,
 /*----------------------------------------------------------------------------*/
 /*!
  * @brief This function will validate the Rx Action Frame and indicate to uppoer
- *            layer if the specified conditions were matched.
+ *            layer.
  *
  * @param[in] prAdapter          Pointer to the Adapter structure.
  * @param[in] prSwRfb            Pointer to SW RFB data structure.
- * @param[out] pu4ControlFlags   Control flags for replying the Probe Response
  *
  * @retval none
  */
@@ -7514,37 +7557,24 @@ void aisFuncValidateRxActionFrame(struct ADAPTER *prAdapter,
 
 	DEBUGFUNC("aisFuncValidateRxActionFrame");
 
-	do {
-		if (prSwRfb->prStaRec)
-			ucBssIndex = prSwRfb->prStaRec->ucBssIndex;
+	if (prSwRfb->prStaRec)
+		ucBssIndex = prSwRfb->prStaRec->ucBssIndex;
 
-		/* CFG_SUPPORT_NAN and CFG_ENABLE_WIFI_DIRECT
-		* consider to bypass AIS RxActionFrame
-		*/
-		if (!IS_BSS_INDEX_AIS(prAdapter, ucBssIndex)) {
-			DBGLOG(AIS, LOUD,
-				"Use default, invalid index = %d\n",
-				ucBssIndex);
-			return;
-		}
+	/* CFG_SUPPORT_NAN and CFG_ENABLE_WIFI_DIRECT
+	 * consider to bypass AIS RxActionFrame
+	 */
+	if (!IS_BSS_INDEX_AIS(prAdapter, ucBssIndex)) {
+		DBGLOG(AIS, LOUD,
+			"Use default, invalid index = %d\n", ucBssIndex);
+		return;
+	}
 
-		prAisFsmInfo
-			= aisGetAisFsmInfo(prAdapter, ucBssIndex);
+	prAisFsmInfo = aisGetAisFsmInfo(prAdapter, ucBssIndex);
 
-		if (1
-		/* prAisFsmInfo->u4AisPacketFilter &
-		 * PARAM_PACKET_FILTER_ACTION_FRAME
-		 */
-		) {
-			/* Leave the action frame to wpa_supplicant. */
-			kalIndicateRxMgmtFrame(
-				prAdapter,
-				prAdapter->prGlueInfo,
-				prSwRfb,
-				ucBssIndex);
-		}
-
-	} while (FALSE);
+	/* All action frames indicate to wpa_supplicant */
+	/* Leave the action frame to wpa_supplicant. */
+	kalIndicateRxMgmtFrame(prAdapter, prAdapter->prGlueInfo,
+		prSwRfb, ucBssIndex);
 
 	return;
 
@@ -9246,10 +9276,12 @@ static void aisScanProcessReqExtra(struct ADAPTER *prAdapter,
 	struct MSG_SCN_SCAN_REQ_V2 *prScanReqMsg,
 	struct PARAM_SCAN_REQUEST_ADV *prScanRequest)
 {
-	/* Reduce APP scan's dwell time, prevent it affecting
-	 * TX/RX performance
+	/* Reduce APP scan's dwell time when scan ch > 5,
+	 * prevent it affecting TX/RX performance
 	 */
-	if (prScanRequest->u4Flags & NL80211_SCAN_FLAG_LOW_SPAN) {
+	if ((prScanRequest->u4Flags &
+		NL80211_SCAN_FLAG_LOW_SPAN)
+		&& prScanReqMsg->ucChannelListNum > 5) {
 		prScanReqMsg->u2ChannelDwellTime =
 			SCAN_CHANNEL_DWELL_TIME_MSEC_APP;
 		prScanReqMsg->u2ChannelMinDwellTime =

@@ -100,27 +100,12 @@ $(info $$WLAN_CHIP_ID is [${WLAN_CHIP_ID}])
 $(info $$MTK_COMBO_CHIP is [${MTK_COMBO_CHIP}])
 $(info $$WLAN_CONNAC3_DEV is [${WLAN_CONNAC3_DEV}])
 
-ifeq ($(WLAN_CHIP_ID), 6855)
-CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH := n
-CONFIG_MTK_WIFI_11AX_SUPPORT=y
-CONFIG_MTK_WIFI_11BE_SUPPORT=y
-CONFIG_MTK_WIFI_11BE_MLO_SUPPORT=y
-CONFIG_MTK_WIFI_CONNAC3X=y
-CONFIG_NUM_OF_WFDMA_RX_RING=4
-CONFIG_NUM_OF_WFDMA_TX_RING=0
-CONFIG_MTK_WIFI_UNIFIED_COMMND_SUPPORT=y
-CONFIG_MTK_WIFI_TWT_SUPPORT=y
-CONFIG_MTK_WIFI_TWT_STA_DIRECT_TEARDOWN=y
-CONFIG_MTK_WIFI_TWT_SMART_STA=n
-CONFIG_MTK_WIFI_TWT_HOTSPOT_SUPPORT=n
-CONFIG_MTK_WIFI_TWT_HOTSPOT_AC_SUPPORT=n
-CONFIG_MTK_WIFI_BTWT_SUPPORT=y
-CONFIG_MTK_WIFI_11BE_ML_TWT_SUPPORT=y
-CONFIG_MLD_LINK_MAX=2
-CONFIG_DBDC_MODE=1
-CONFIG_MTK_WIFI_6G_SUPPORT=y
-CONFIG_MTK_HOST_OFFLOAD_SUPPORT=y
-CONFIG_SUPPORT_FORCE_ALTX=y
+ifneq ($(CONFIG_MTK_EMI_LEGACY),)
+ccflags-y += -DCONFIG_WLAN_MTK_EMI=1
+endif
+
+ifneq ($(CONFIG_MTK_EMI_LEGACY),)
+ccflags-y += -DCONFIG_WLAN_MTK_EMI=1
 endif
 
 ifneq ($(CONFIG_MTK_EMI),)
@@ -171,6 +156,10 @@ ifneq ($(filter SOC2_1X1,$(MTK_COMBO_CHIP)),)
 ccflags-y:=$(filter-out -USOC2_1X1,$(ccflags-y))
 ccflags-y += -DSOC2_1X1
 ccflags-y += -DCONFIG_MTK_WIFI_VHT80
+ifneq ($(filter 6835, $(WLAN_CHIP_ID)),)
+	ccflags-y += -DCFG_WLAN_LK_FWDL_SUPPORT=1
+	ccflags-y += -DCFG_WLAN_ATF_SUPPORT=0
+endif
 endif
 
 ifneq ($(filter SOC2_2X2,$(MTK_COMBO_CHIP)),)
@@ -302,11 +291,18 @@ else
     ccflags-y += -DCFG_ENABLE_HOST_BUS_TIMEOUT=0
 endif
 
-ifneq ($(filter 6855, $(WLAN_CHIP_ID)),)
+#ifneq ($(filter SOC2_1x1 SOC2_2x2, $(MTK_COMBO_CHIP)),)
+ifneq ($(filter 6835, $(WLAN_CHIP_ID)),)
+    ccflags-y += -DCFG_SUPPORT_MDDP_AOR=0
+    ccflags-y += -DCFG_SUPPORT_MDDP_SHM=1
+else ifneq ($(filter 6855, $(WLAN_CHIP_ID)),)
     ccflags-y += -DCFG_SUPPORT_MDDP_AOR=1
+    ccflags-y += -DCFG_SUPPORT_MDDP_SHM=0
 else
     ccflags-y += -DCFG_SUPPORT_MDDP_AOR=0
+    ccflags-y += -DCFG_SUPPORT_MDDP_SHM=0
 endif
+#endif
 
 ifneq ($(findstring 5_0,$(MTK_COMBO_CHIP)),)
 ccflags-y:=$(filter-out -USOC5_0,$(ccflags-y))
@@ -440,6 +436,7 @@ ifeq ($(MTK_ANDROID_WMT), y)
     CONFIG_WIFI_COREDUMP_SUPPORT=y
     ccflags-y += -DCFG_ROM_PATCH_NO_SEM_CTRL=1
     ccflags-y += -DCFG_SUPPORT_SET_IPV6_NETWORK=1
+
     ifeq ($(CONFIG_WLAN_MT6985_MP2), y)
         CONFIG_SNIFFER_RADIOTAP=y
         CONFIG_WFDMA_AP_MSI_NUM=8
@@ -454,6 +451,8 @@ ifeq ($(MTK_ANDROID_WMT), y)
         CONFIG_DYNAMIC_RFB_ADJUSTMENT=y
         ccflags-y += -DCFG_WFD_SCC_BALANCE_DEF_ENABLE=1
         CONFIG_SUPPORT_WIFI_SLEEP_COUNT=y
+        CONFIG_MTK_WIFI_AER_L05_RESET=y
+        CONFIG_SUPPORT_STATS_ONE_CMD=y
         ifeq ($(CONFIG_WLAN_MT6985_MP2_LP), y)
         endif
     endif
@@ -527,19 +526,9 @@ endif
 
 # ===== Before is project setting =====
 ifeq ($(WM_RAM),ce)
-ccflags-y += -DCONFIG_WM_RAM_TYPE=1
-CONFIG_MTK_MDDP_SUPPORT=
+    ccflags-y += -DCONFIG_WM_RAM_TYPE=1
 else
-ccflags-y += -DCONFIG_WM_RAM_TYPE=0
-#CONFIG_MTK_WIFI_PCIE_MSI_SUPPORT=y
-#CONFIG_MTK_WIFI_FW_LOG_MMIO=y
-#CONFIG_MTK_WIFI_PMIC_QUERY=y
-CONFIG_TX_HIF_PORT_QUEUE_SUPPORT=y
-CONFIG_MTK_WIFI_SUPPORT_UDS_FWDL=y
-CONFIG_SUPPORT_TX_HIF_CREDIT_FEATURE=y
-CONFIG_SUPPORT_PRE_ON_PHY_ACTION=y
-CONFIG_MTK_WIFI_WFD_SCC_BALANCE=y
-CONFIG_DEVICE_SUSPEND_BY_MOBILE=y
+    ccflags-y += -DCONFIG_WM_RAM_TYPE=0
 endif
 # ===== Below will add compile flag based on project setting =====
 
@@ -589,6 +578,12 @@ ifeq ($(CONFIG_SUPPORT_TX_DATA_DELAY), y)
     endif
 else
     ccflags-y += -DCFG_SUPPORT_TX_DATA_DELAY=0
+endif
+
+ifeq ($(CONFIG_SUPPORT_STATS_ONE_CMD), y)
+    ccflags-y += -DCFG_SUPPORT_STATS_ONE_CMD=1
+else
+    ccflags-y += -DCFG_SUPPORT_STATS_ONE_CMD=0
 endif
 
 ifeq ($(CONFIG_MTK_WIFI_SUPPORT_VOLT_INFO), y)
@@ -799,9 +794,10 @@ ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), usb)
 CONFIG_MTK_HOST_OFFLOAD_SUPPORT=n
 endif
 ifeq ($(CONFIG_MTK_HOST_OFFLOAD_SUPPORT), y)
-        ccflags-y += -DCFG_SUPPORT_HOST_OFFLOAD=1
+    CONFIG_WFDMA_AP_MSI_NUM=8
+    ccflags-y += -DCFG_SUPPORT_HOST_OFFLOAD=1
 else
-        ccflags-y += -DCFG_SUPPORT_HOST_OFFLOAD=0
+    ccflags-y += -DCFG_SUPPORT_HOST_OFFLOAD=0
 endif
 
 ifneq ($(CONFIG_NUM_OF_WFDMA_TX_RING),)
@@ -1272,6 +1268,12 @@ else
     ccflags-y += -DCFG_ENABLE_GKI_SUPPORT=0
 endif
 
+ifeq ($(CONFIG_MTK_WIFI_AER_L05_RESET), y)
+    ccflags-y += -DCFG_MTK_WIFI_AER_L05_RESET=1
+else
+    ccflags-y += -DCFG_MTK_WIFI_AER_L05_RESET=0
+endif
+
 MODULE_NAME := wlan_drv_gen4m_$(WLAN_CHIP_ID)
 
 ifeq ($(CONFIG_MTK_COMBO_SLT), golden)
@@ -1300,6 +1302,7 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/emi/submodule
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/pmic/include/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/power_throttling/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/connectivity/common
+ccflags-y += -I$(srctree)/drivers/gpu/drm/mediatek/mediatek_v2/
 ccflags-y += -I$(srctree)/drivers/devfreq/
 ccflags-y += -I$(srctree)/net
 ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/connfem/include/
@@ -1429,7 +1432,7 @@ ccflags-y += -DCFG_WFD_SCC_BALANCE_SUPPORT=0
 endif
 
 ifeq ($(CONFIG_MSCS_FAST_PATH_SUPPORT), y)
-ccflags-y += -DCFG_MSCS_SUPPORT=1
+ccflags-y += -DCFG_FAST_PATH_SUPPORT=1
 endif
 
 ifeq ($(CONFIG_MTK_WIFI_WFDMA_BK_RS), y)
@@ -1519,7 +1522,8 @@ OS_OBJS := 	$(OS_DIR)gl_init.o \
 		$(OS_DIR)platform.o \
 		$(OS_DIR)gl_emi.o \
 		$(OS_DIR)gl_csi.o \
-		$(OS_DIR)gl_sys_lock.o
+		$(OS_DIR)gl_sys_lock.o \
+		$(OS_DIR)gl_cmd_validate.o
     ifeq ($(CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH), y)
         OS_OBJS += $(OS_DIR)gl_fw_log.o
     endif
@@ -1569,6 +1573,7 @@ MGMT_OBJS := 	$(MGMT_DIR)ais_fsm.o \
 
 ifneq ($(os), none)
 MGMT_OBJS +=	$(MGMT_DIR)wlan_ring.o \
+		$(OS_DIR)gl_sa_log.o \
 		$(MGMT_DIR)ics.o
 endif
 

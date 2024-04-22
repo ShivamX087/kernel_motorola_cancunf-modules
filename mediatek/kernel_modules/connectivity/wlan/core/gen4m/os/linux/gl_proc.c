@@ -159,7 +159,7 @@
  */
 /* notice: str only can be an array */
 #define SNPRINTF(buf, size, arg)   {buf += \
-	snprintf((char *)(buf), size, PRINTF_ARG arg); }
+		snprintf((char *)(buf), size, PRINTF_ARG arg); }
 
 #if CFG_WIFI_TXPWR_TBL_DUMP
 #define TXPWR_TABLE_ENTRY(_siso_mcs, _cdd_mcs, _mimo_mcs, _idx)	\
@@ -179,17 +179,12 @@
 struct _TWT_SMART_STA_T g_TwtSmartStaCtrl;
 #endif
 
-#if CFG_SUPPORT_CSI
-struct CSI_DATA_T rTmpCSIData;
-#endif
-
 /*******************************************************************************
  *                           P R I V A T E   D A T A
  *******************************************************************************
  */
 static struct GLUE_INFO *g_prGlueInfo_proc;
 static struct proc_dir_entry *gprProcRoot;
-
 #if (BUILD_QA_DBG)
 static uint32_t u4McrOffset;
 static uint8_t aucDbModuleName[][PROC_DBG_LEVEL_MAX_DISPLAY_STR_LEN] = {
@@ -401,6 +396,7 @@ static ssize_t procCSIDataRead(struct file *filp,
 	uint32_t u4StartIdx = 0;
 	int32_t i4Pos = 0;
 	struct CSI_INFO_T *prCSIInfo = NULL;
+	struct CSI_DATA_T *prTempCSIData = NULL;
 	u_int8_t bStatus;
 
 	if (g_prGlueInfo_proc && g_prGlueInfo_proc->u4ReadyFlag &&
@@ -417,15 +413,21 @@ static ssize_t procCSIDataRead(struct file *filp,
 		wait_event_interruptible(g_prGlueInfo_proc->waitq_csi,
 			prCSIInfo->u4CSIBufferUsed != 0);
 
+		prTempCSIData = glCsiGetCSIData();
+		if (!prTempCSIData) {
+			DBGLOG(REQ, ERROR, "[CSI] NULL CSI data.\n");
+			return -EFAULT;
+		}
+
 		/*
 		 * No older CSI data in buffer waiting for reading out,
 		 * so prepare a new one for reading.
 		 */
 		bStatus = wlanPopCSIData(g_prGlueInfo_proc->prAdapter,
-			&rTmpCSIData);
+			prTempCSIData);
 		if (bStatus)
 			i4Pos = wlanCSIDataPrepare(temp,
-				prCSIInfo, &rTmpCSIData);
+				prCSIInfo, prTempCSIData);
 
 		/* The frist run of reading the CSI data */
 		u4StartIdx = 0;
@@ -550,6 +552,13 @@ static ssize_t procCountryWrite(struct file *file, const char __user *buffer,
 	}
 
 	u4CopySize = (count < u4CopySize) ? count : (u4CopySize - 1);
+
+	if (u4CopySize < 2) {
+		DBGLOG(REQ, WARN, "Invaild country code len[%u]\n",
+			u4CopySize);
+		i4Ret = -EFAULT;
+		goto freeBuf;
+	}
 
 	if (copy_from_user(pucProcBuf, buffer, u4CopySize)) {
 		DBGLOG(REQ, WARN, "error of copy from user\n");
@@ -1646,7 +1655,6 @@ static ssize_t procCfgRead(struct file *filp, char __user *buf, size_t count,
 	    "'D': driver part current setting\n"
 	    "===================================\n";
 	u4StrLen = kalStrLen(str);
-	temp = pucProcBuf;
 	kalStrnCpy(temp, str, u4StrLen);
 	temp += u4StrLen;
 
@@ -1753,6 +1761,7 @@ static ssize_t procCfgWrite(struct file *file, const char __user *buffer,
 		goto freeBuf;
 	}
 
+	kalMemSet(pucProcBuf, 0, u4CopySize);
 	u4CopySize = (count < u4CopySize) ? count : (u4CopySize - 1);
 
 	pucTmp = pucProcBuf;
@@ -2019,6 +2028,7 @@ int32_t procUninitProcFs(void)
 #endif
 
 	return 0;
+
 }
 
 /*----------------------------------------------------------------------------*/

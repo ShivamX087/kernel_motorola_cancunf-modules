@@ -138,6 +138,7 @@ typedef uint8_t u8;
  * and almost all of the glue layer includes #include "precomp.h"
  * should we just but it in wlan_lib.h
  */
+extern u_int8_t fgIsMcuOff;
 extern u_int8_t fgIsBusAccessFailed;
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
 extern u_int8_t fgTriggerDebugSop;
@@ -718,13 +719,13 @@ enum ENUM_NVRAM_STATE {
 /* WMM QOS user priority from 802.1D/802.11e */
 enum ENUM_WMM_UP {
 	WMM_UP_BE_INDEX = 0,
-	WMM_UP_BK_INDEX,
-	WMM_UP_RESV_INDEX,
-	WMM_UP_EE_INDEX,
-	WMM_UP_CL_INDEX,
-	WMM_UP_VI_INDEX,
-	WMM_UP_VO_INDEX,
-	WMM_UP_NC_INDEX,
+	WMM_UP_BK_INDEX = 1,
+	WMM_UP_RESV_INDEX = 2,
+	WMM_UP_EE_INDEX = 3,
+	WMM_UP_CL_INDEX = 4,
+	WMM_UP_VI_INDEX = 5,
+	WMM_UP_VO_INDEX = 6,
+	WMM_UP_NC_INDEX = 7,
 	WMM_UP_INDEX_NUM
 };
 

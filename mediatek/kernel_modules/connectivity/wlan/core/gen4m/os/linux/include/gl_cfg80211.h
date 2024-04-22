@@ -607,6 +607,15 @@ int mtk_cfg_tdls_mgmt(struct wiphy *wiphy,
 		      u8 dialog_token, u16 status_code,
 		      const u8 *buf, size_t len);
 #endif
+#if CFG_SUPPORT_TDLS_OFFCHANNEL
+int mtk_tdls_channel_switch(struct wiphy *wiphy,
+		      struct net_device *dev,
+		      const u8 *addr, u8 oper_class,
+		      struct cfg80211_chan_def *chandef);
+void mtk_tdls_cancel_channel_switch(struct wiphy *wiphy,
+		      struct net_device *dev,
+		       const u8 *addr);
+#endif
 #endif /* CFG_SUPPORT_TDLS */
 
 #if KERNEL_VERSION(3, 19, 0) <= CFG80211_VERSION_CODE
@@ -812,6 +821,54 @@ int mtk_cfg80211_external_auth(struct wiphy *wiphy, struct net_device *dev,
 
 int mtk_IsP2PNetDevice(struct GLUE_INFO *prGlueInfo,
 			  struct net_device *ndev);
+
+/* nl80211 vendor string command handler */
+int testmode_disable_tdls_ps(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_neighbor_request(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_bss_tran_query(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_osharemod(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_cmd_example(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_reassoc(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_add_roam_scn_chnl(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_set_ax_blacklist(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_rtt_test(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_set_report_vendor_specified(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+#if CFG_SUPPORT_NCHO
+int testmode_set_ncho_roam_trigger(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_get_ncho_roam_trigger(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_set_ncho_roam_delta(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_get_ncho_roam_delta(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_set_ncho_roam_scn_period(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_get_ncho_roam_scn_period(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_set_ncho_roam_scn_chnl(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_get_ncho_roam_scn_chnl(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_set_ncho_roam_scn_ctrl(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_get_ncho_roam_scn_ctrl(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_set_ncho_mode(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+int testmode_get_ncho_mode(struct wiphy *wiphy,
+	struct wireless_dev *wdev, char *pcCommand, int i4TotalLen);
+#endif
 
 /*******************************************************************************
  *                              F U N C T I O N S

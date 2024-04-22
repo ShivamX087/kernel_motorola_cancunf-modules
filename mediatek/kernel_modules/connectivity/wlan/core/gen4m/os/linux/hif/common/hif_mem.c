@@ -347,6 +347,9 @@ int halAllocHifMem(struct platform_device *pdev,
 
 #if (CFG_SUPPORT_RX_PAGE_POOL == 0) || (CFG_SUPPORT_DYNAMIC_PAGE_POOL == 1)
 	u4DataNum = prBusInfo->rx_data_ring_num;
+#else
+	u4DataNum = 0;
+#endif /* CFG_SUPPORT_RX_PAGE_POOL == 0 || CFG_SUPPORT_DYNAMIC_PAGE_POOL == 1 */
 	u4EvtNum = prBusInfo->rx_evt_ring_num;
 	for (u4Idx = 0; u4Idx < NUM_OF_RX_RING; u4Idx++) {
 		uint32_t u4Cnt, u4PktSize;
@@ -377,7 +380,6 @@ int halAllocHifMem(struct platform_device *pdev,
 			}
 		}
 	}
-#endif /* CFG_SUPPORT_RX_PAGE_POOL == 0 || CFG_SUPPORT_DYNAMIC_PAGE_POOL == 1 */
 
 #if HIF_TX_PREALLOC_DATA_BUFFER
 	for (u4Idx = 0; u4Idx < HIF_TX_MSDU_TOKEN_NUM; u4Idx++) {
@@ -492,6 +494,7 @@ void *halCopyPathAllocRxBuf(struct GL_HIF_INFO *prHifInfo,
 
 	prDmaBuf->AllocPa = grMem.rRxMemBuf[u4Num][u4Idx].pa;
 	prDmaBuf->AllocVa = grMem.rRxMemBuf[u4Num][u4Idx].va;
+	prDmaBuf->fgIsCopyPath = TRUE;
 
 	if (prDmaBuf->AllocVa == NULL)
 		DBGLOG(HAL, ERROR, "AllocVa is NULL[%u][%u]\n", u4Num, u4Idx);
@@ -651,11 +654,20 @@ static u_int8_t halDmaMapSingleRetry(struct GL_HIF_INFO *prHifInfo,
 		if (!i4Res)
 			break;
 
+		if (prHifInfo->pdev) {
+			DBGLOG(INIT, WARN,
+			       "va: 0x%llx, mask: 0x%llx, limit: 0x%llx\n",
+			       AllocVa,
+			       *prHifInfo->pdev->dev.dma_mask,
+			       prHifInfo->pdev->dev.bus_dma_limit);
+		}
+
 		kalMsleep(1);
 	}
 	if (u4Cnt == DMA_MAP_RETRY_COUNT) {
-		DBGLOG(HAL, ERROR, "dma mapping error![0x%llx][%d]\n",
-		       (uint64_t)rAddr, i4Res);
+		DBGLOG(HAL, ERROR,
+		       "dma mapping error![0x%llx][0x%llx][%u][%d]\n",
+		       (uint64_t)rAddr, AllocVa, AllocSize, i4Res);
 		fgRet = FALSE;
 	}
 
@@ -692,6 +704,7 @@ void *halZeroCopyPathAllocRxBuf(struct GL_HIF_INFO *prHifInfo,
 		return NULL;
 	}
 	prDmaBuf->AllocPa = (phys_addr_t)rAddr;
+	prDmaBuf->fgIsCopyPath = FALSE;
 	return (void *)pkt;
 }
 
@@ -905,6 +918,11 @@ void halZeroCopyPathDumpRx(struct GL_HIF_INFO *prHifInfo,
 	if (!prRxCell->pPacket || !prDmaBuf)
 		return;
 
+	if (prDmaBuf->fgIsCopyPath) {
+		halCopyPathDumpRx(prHifInfo, prRxRing, u4Idx, u4DumpLen);
+		return;
+	}
+
 	halZeroCopyPathUnmapRxBuf(prHifInfo, prDmaBuf->AllocPa,
 				  prDmaBuf->AllocSize);
 
@@ -941,7 +959,16 @@ void *halZeroCopyPathAllocPagePoolRxBuf(struct GL_HIF_INFO *prHifInfo,
 	}
 
 #ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
+	if (skb_headroom(prSkb) == CFG_RADIOTAP_HEADROOM)
+		goto skip;
+
+	if (skb_headroom(prSkb) != 0) {
+		/* Reset skb */
+		prSkb->data = prSkb->head;
+		skb_reset_tail_pointer(prSkb);
+	}
 	skb_reserve(prSkb, CFG_RADIOTAP_HEADROOM);
+skip:
 #endif
 
 	prDmaBuf->AllocVa = (void *)prSkb->data;

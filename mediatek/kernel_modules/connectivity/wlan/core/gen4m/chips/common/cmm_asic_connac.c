@@ -832,13 +832,18 @@ void asicCheckDummyReg(struct GLUE_INFO *prGlueInfo)
 
 	prAdapter = prGlueInfo->prAdapter;
 	prHifInfo = &prGlueInfo->rHifInfo;
+
 	kalDevRegRead(prGlueInfo, CONN_DUMMY_CR, &u4Value);
-	DBGLOG(HAL, TRACE, "Check sleep mode DummyReg[0x%x]\n", u4Value);
+	DBGLOG(HAL, TRACE, "Check sleep mode DummyReg[0x%x]\n",
+		u4Value);
 	if (u4Value != PDMA_DUMMY_RESET_VALUE)
 		return;
 
-	for (u4Idx = 0; u4Idx < NUM_OF_TX_RING; u4Idx++)
+	for (u4Idx = 0; u4Idx < NUM_OF_TX_RING; u4Idx++) {
 		prHifInfo->TxRing[u4Idx].TxSwUsedIdx = 0;
+		prHifInfo->TxRing[u4Idx].u4UsedCnt = 0;
+		prHifInfo->TxRing[u4Idx].TxCpuIdx = 0;
+	}
 	DBGLOG(HAL, TRACE, "Weakup from sleep mode\n");
 
 	if (halWpdmaGetRxDmaDoneCnt(prGlueInfo, RX_RING_EVT)) {

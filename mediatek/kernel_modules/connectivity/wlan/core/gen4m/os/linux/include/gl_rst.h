@@ -90,48 +90,6 @@
  *                              C O N S T A N T S
  *******************************************************************************
  */
-#if defined(_HIF_SDIO)
-/* #ifdef CONFIG_X86 */
-/*Kernel-3.10-ARM did not provide X86_FLAG & HIF shouldn't bind platform*/
-#if (CFG_MTK_ANDROID_WMT)
-#define MTK_WCN_HIF_SDIO		1
-#else
-#define MTK_WCN_HIF_SDIO		0
-#endif
-#else
-#define MTK_WCN_HIF_SDIO		0
-#endif
-
-#if defined(_HIF_AXI)
-#ifdef LINUX
-#ifdef CONFIG_X86
-#define MTK_WCN_HIF_AXI			0
-#else
-#define MTK_WCN_HIF_AXI			1
-#endif
-#else
-#define MTK_WCN_HIF_AXI			0
-#endif
-#else
-#define MTK_WCN_HIF_AXI			0
-#endif
-
-#if defined(_HIF_PCIE)
-#if IS_MOBILE_SEGMENT
-#define MTK_WCN_HIF_PCIE		1
-#else
-#define MTK_WCN_HIF_PCIE		0
-#endif
-#else
-#define MTK_WCN_HIF_PCIE		0
-#endif
-
-#if (MTK_WCN_HIF_SDIO == 1) || (MTK_WCN_HIF_AXI == 1) || (MTK_WCN_HIF_PCIE == 1)
-#define CFG_WMT_RESET_API_SUPPORT   1
-#else
-#define CFG_WMT_RESET_API_SUPPORT   0
-#endif
-
 #define RST_FLAG_CHIP_RESET        0
 #define RST_FLAG_DO_CORE_DUMP              BIT(0)
 #define RST_FLAG_PREVENT_POWER_OFF         BIT(1)
@@ -198,6 +156,7 @@ enum _ENUM_CHIP_RESET_REASON_TYPE_T {
 	RST_SMC_CMD_FAIL,
 	RST_PCIE_NOT_READY,
 	RST_DEVAPC,
+	RST_AER,
 	RST_REASON_MAX
 };
 
@@ -211,6 +170,15 @@ enum ENUM_WFSYS_RESET_STATE_TYPE_T {
 	WFSYS_RESET_STATE_MAX
 };
 
+#if CFG_WMT_RESET_API_SUPPORT
+struct reset_pending_req {
+	uint32_t flag;
+	uint8_t file[256];
+	uint32_t line;
+	u_int8_t fw_acked;
+};
+#endif
+
 struct RESET_STRUCT {
 	struct GLUE_INFO *prGlueInfo;
 	struct work_struct rst_work;
@@ -221,6 +189,9 @@ struct RESET_STRUCT {
 	struct work_struct rst_trigger_work;
 	uint32_t rst_trigger_flag;
 	struct completion halt_comp;
+	struct notifier_block pm_nb;
+	u_int8_t is_suspend;
+	struct reset_pending_req *pending_req;
 #endif
 };
 

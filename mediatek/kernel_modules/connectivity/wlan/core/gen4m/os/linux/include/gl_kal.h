@@ -158,7 +158,7 @@ extern struct platform_device *g_prPlatDev;
 	(GLUE_FLAG_HALT | GLUE_FLAG_SUB_MOD_MULTICAST | \
 	GLUE_FLAG_TX_CMD_DONE | GLUE_FLAG_TXREQ | GLUE_FLAG_TIMEOUT | \
 	GLUE_FLAG_FRAME_FILTER | GLUE_FLAG_OID | GLUE_FLAG_RX | \
-	GLUE_FLAG_SER_TIMEOUT)
+	GLUE_FLAG_SER_TIMEOUT | GLUE_FLAG_DISABLE_PERF)
 
 #define GLUE_FLAG_HIF_PROCESS \
 	(GLUE_FLAG_HALT | GLUE_FLAG_INT | GLUE_FLAG_HIF_TX | \
@@ -187,6 +187,7 @@ extern struct platform_device *g_prPlatDev;
 
 #define PERF_MON_TP_CONDITION (125000)
 #define PERF_MON_COEX_TP_THRESHOLD (100)
+#define PERF_MON_MCC_TP_THRESHOLD	(50)
 
 #define PERF_MON_RFB_MAX_THRESHOLD (3)
 
@@ -232,8 +233,10 @@ extern struct platform_device *g_prPlatDev;
 #define TRAFFIC_RHRESHOLD	150
 #endif
 
+#if CFG_SUPPORT_SA_LOG
 #define WIFI_LOG_MSG_MAX	(512)
 #define WIFI_LOG_MSG_BUFFER	(WIFI_LOG_MSG_MAX * 2)
+#endif
 
 #define KAL_TRACE __builtin_return_address(0)
 
@@ -364,6 +367,7 @@ enum ENUM_SPIN_LOCK_CATEGORY_E {
 	SPIN_LOCK_SET_OWN,
 #if CFG_SUPPORT_NAN
 	SPIN_LOCK_NAN_NEGO_CRB,
+	SPIN_LOCK_NAN_NDL_FLOW_CTRL,
 #endif
 #if (CFG_CE_ASSERT_DUMP == 1)
 	SPIN_LOCK_CORE_DUMP,
@@ -376,6 +380,7 @@ enum ENUM_SPIN_LOCK_CATEGORY_E {
 #endif
 	SPIN_LOCK_HIF_REMAP,
 	SPIN_LOCK_SW_EMI_RING,
+	SPIN_LOCK_PMKID,
 	SPIN_LOCK_NUM
 };
 
@@ -1263,27 +1268,29 @@ int8_t atoi(uint8_t ch);
 	do {struct sk_buff *skb = (struct sk_buff *)pvPacket; \
 	    memcpy(pucDestBuffer, skb->data, skb->len); } while (0)
 
+#define kalGetJiffies()                (jiffies)
 #define kalGetTimeTick()                jiffies_to_msecs(jiffies)
-
 #define kalGetTimeTickNs()              sched_clock()
 
-#define kalPrintLogLimited(fmt, ...)					\
+#if CFG_SUPPORT_SA_LOG
+#define kalPrintSALogLimited(fmt, ...)					\
 ({									\
 	static DEFINE_RATELIMIT_STATE(_rs,				\
 		DEFAULT_RATELIMIT_INTERVAL, DEFAULT_RATELIMIT_BURST);	\
 	ratelimit_set_flags(&_rs, RATELIMIT_MSG_ON_RELEASE);		\
 									\
 	if (__ratelimit(&_rs))						\
-		kalPrintLog(fmt, ##__VA_ARGS__);			\
+		kalPrintSALog(fmt, ##__VA_ARGS__);			\
 })
+#endif
 
 #ifdef CFG_COMBO_SLT_GOLDEN
 #define WLAN_TAG                        "[wlan_golden]"
 #else
 #define WLAN_TAG                        "[wlan]"
 #endif
-#define kalPrint               kalPrintLog
-#define kalPrintLimited(_Fmt...) kalPrintLogLimited(WLAN_TAG _Fmt)
+#define kalPrint(_Fmt...)               pr_info(WLAN_TAG _Fmt)
+#define kalPrintLimited(_Fmt...)        pr_info_ratelimited(WLAN_TAG _Fmt)
 
 #define kalBreakPoint() \
 do { \
@@ -1337,6 +1344,10 @@ do { \
 #define KAL_GET_TIME_INTERVAL() \
 	((SEC_TO_USEC(__rTe.tv_sec) + KAL_GET_USEC(__rTe)) - \
 	(SEC_TO_USEC(__rTs.tv_sec) + KAL_GET_USEC(__rTs)))
+#define KAL_GET_TIME_INTERVAL_SPEC(_Start, _End) \
+		((SEC_TO_USEC(_End.tv_sec) + KAL_GET_USEC(_End)) - \
+		(SEC_TO_USEC(_Start.tv_sec) + KAL_GET_USEC(_Start)))
+
 #define KAL_ADD_TIME_INTERVAL(_Interval) \
 	{ \
 		(_Interval) += KAL_GET_TIME_INTERVAL(); \
@@ -1393,8 +1404,8 @@ do { \
 /*----------------------------------------------------------------------------*/
 /* Macros of systrace operations for using in Driver Layer                    */
 /*----------------------------------------------------------------------------*/
-#if !CONFIG_WLAN_DRV_BUILD_IN
-
+/* Not build-in project and not userload */
+#if (CONFIG_WLAN_DRV_BUILD_IN == 0) && (BUILD_QA_DBG == 1)
 #define kalTraceBegin(_fmt, ...) \
 	tracing_mark_write("B|%d|" _fmt "\n", current->tgid, ##__VA_ARGS__)
 
@@ -1628,6 +1639,7 @@ void kal_skb_reserve(void *pvPacket, uint8_t ucLength);
 void kal_skb_split(void *pvPacket, void *pvPacket1, const uint32_t u4Length);
 uint8_t *kal_skb_push(void *pvPacket, uint32_t u4Length);
 uint8_t *kal_skb_pull(void *pvPacket, uint32_t u4Length);
+uint32_t kalDuplicateSwRfbSanity(struct SW_RFB *prSwRfb);
 void kalSkbReuseCheck(struct SW_RFB *prSwRfb);
 
 void kalOsTimerInitialize(struct GLUE_INFO *prGlueInfo,
@@ -1716,7 +1728,8 @@ kalRemainOnChannelExpired(struct GLUE_INFO *prGlueInfo,
 void
 kalIndicateChannelSwitch(struct GLUE_INFO *prGlueInfo,
 			enum ENUM_CHNL_EXT eSco,
-			uint8_t ucChannelNum, enum ENUM_BAND eBand);
+			uint8_t ucChannelNum, enum ENUM_BAND eBand,
+			uint8_t ucBssIndex);
 #endif
 
 void
@@ -1782,7 +1795,7 @@ u_int8_t kalDevUhwRegWrite(struct GLUE_INFO *prGlueInfo,
 u_int8_t
 kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 	       uint16_t u2Port, uint32_t u2Len, uint8_t *pucBuf,
-	       uint32_t u2ValidOutBufSize);
+	       uint32_t u2ValidOutBufSize, u_int8_t isPollMode);
 
 u_int8_t
 kalDevPortWrite(struct GLUE_INFO *prGlueInfo,
@@ -2265,7 +2278,7 @@ uint32_t kalGetCpuBoostThreshold(void);
 uint32_t kalGetLittleCpuBoostThreshold(void);
 #endif /* CFG_SUPPORT_LITTLE_CPU_BOOST */
 int32_t kalCheckVcoreBoost(struct ADAPTER *prAdapter, uint8_t uBssIndex);
-uint32_t kalGetFwVerOffsetAddr(void);
+uint32_t kalGetFwVerOffset(void);
 uint32_t kalGetEmiMetOffset(void);
 void kalSetEmiMetOffset(uint32_t newEmiMetOffset);
 void kalSetRpsMap(struct GLUE_INFO *glue, unsigned long value);
@@ -2385,7 +2398,7 @@ int _kalSnprintf(char *buf, size_t size, const char *fmt, ...);
 int _kalSprintf(char *buf, const char *fmt, ...);
 
 /* systrace utilities */
-#if !CONFIG_WLAN_DRV_BUILD_IN
+#if (CONFIG_WLAN_DRV_BUILD_IN == 0) && (BUILD_QA_DBG == 1)
 void tracing_mark_write(const char *fmt, ...);
 #endif
 
@@ -2403,8 +2416,9 @@ void kalSyncTimeToFWByIoctl(void);
 void kalUpdateCompHdlrRec(struct ADAPTER *prAdapter,
 	PFN_OID_HANDLER_FUNC pfnOidHandler, struct CMD_INFO *prCmdInfo);
 
-extern uint32_t get_wifi_standalone_log_mode(void);
-void kalPrintLog(const char *fmt, ...);
+#if CFG_SUPPORT_SA_LOG
+void kalPrintSALog(const char *fmt, ...);
+#endif
 
 #if (CFG_SUPPORT_POWER_THROTTLING == 1)
 void kalPwrLevelHdlrRegister(struct ADAPTER *prAdapter,
@@ -2429,6 +2443,7 @@ void kal_sched_set(struct task_struct *p, int policy,
 void kalSetThreadSchPolicyPriority(struct GLUE_INFO *prGlueInfo);
 void kalSetLogTooMuch(uint32_t u4DriverLevel, uint32_t u4FwLevel);
 void kalGetRealTime(struct REAL_TIME *prRealTime);
+uint64_t kalGetUIntRealTime(void);
 void kalVendorEventRssiBeyondRange(struct GLUE_INFO *prGlueInfo,
 			uint8_t ucBssIdx, int rssi);
 #if CFG_SUPPORT_TPENHANCE_MODE
@@ -2489,7 +2504,6 @@ uint32_t kalGetChannelFrequency(
 		uint8_t ucChannel,
 		uint8_t ucBand);
 
-enum ENUM_BAND kalOperatingClassToBand(uint16_t u2OpClass);
 #if (CFG_SUPPORT_SINGLE_SKU == 1)
 u_int8_t kalFillChannels(
 	struct GLUE_INFO *prGlueInfo,

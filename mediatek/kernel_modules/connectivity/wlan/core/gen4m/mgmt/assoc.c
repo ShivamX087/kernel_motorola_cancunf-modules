@@ -100,7 +100,7 @@ struct APPEND_VAR_IE_ENTRY txAssocReqIETable[] = {
 	{(ELEM_HDR_LEN + ELEM_MAX_LEN_HT_CAP), NULL, rlmReqGenerateHtCapIE}
 	,			/* 45 */
 #if CFG_SUPPORT_802_11R
-	{(ELEM_HDR_LEN + 1), NULL, assocGenerateMDIE}, /* Element ID: 54 */
+	{(ELEM_HDR_LEN + 3), NULL, assocGenerateMDIE}, /* Element ID: 54 */
 	{0, rsnCalculateFTIELen, rsnGenerateFTIE}, /* Element ID: 55 */
 #endif
 #if CFG_SUPPORT_802_11K
@@ -222,6 +222,9 @@ struct APPEND_VAR_IE_ENTRY txAssocRespIETable[] = {
 	rsnPmfGenerateTimeoutIE}
 	/* 56 */
 #endif
+	,
+	{(0), p2pFuncCalculateP2p_IELenForOwe,
+	 p2pFuncGenerateP2p_IEForOwe}
 	,
 	{(ELEM_HDR_LEN + ELEM_MAX_LEN_RSN), NULL, rsnGenerateRSNXIE}
 	/* 244 */
@@ -741,7 +744,9 @@ struct MSDU_INFO *assocComposeReAssocReqFrame(struct ADAPTER *prAdapter,
 	assoc_build_nonwfa_vend_ie(prAdapter, prMsduInfo);
 #endif
 
-	nicTxConfigPktControlFlag(prMsduInfo, MSDU_CONTROL_FLAG_FORCE_TX, TRUE);
+	nicTxConfigPktControlFlag(prMsduInfo,
+		MSDU_CONTROL_FLAG_FORCE_TX | MSDU_CONTROL_FLAG_MGNT_2_CMD_QUE,
+		TRUE);
 
 	sortMgmtFrameIE(prAdapter, prMsduInfo);
 

@@ -255,6 +255,7 @@
 	+ HW_MAC_TX_DESC_APPEND_T_LENGTH)
 
 #define NIC_MSDU_REPORT_DUMP_TIMEOUT		5	/* sec */
+#define NIC_MSDU_REPORT_TIMEOUT_SER_TIME	60	/* sec */
 
 /*------------------------------------------------------------------------*/
 /* Tx status related information                                          */
@@ -638,6 +639,8 @@ enum ENUM_MSDU_CONTROL_FLAG {
 	MSDU_CONTROL_FLAG_FORCE_TX = BIT(0),
 	MSDU_CONTROL_FLAG_NON_TX_LINK = BIT(1),
 	MSDU_CONTROL_FLAG_HIDE_INFO = BIT(2),
+	MSDU_CONTROL_FLAG_MGNT_2_CMD_QUE = BIT(3),
+	MSDU_CONTROL_FLAG_FORCE_LINK = BIT(4),
 };
 
 enum ENUM_MSDU_RATE_MODE {
@@ -1157,6 +1160,7 @@ struct TX_DESC_OPS_T {
 		u_int8_t fgDynamicBwRts, u_int8_t fgBeamforming,
 		uint8_t ucAntennaIndex);
 	void (*nic_txd_set_pkt_fixed_rate_option)(
+		struct ADAPTER *prAdapter,
 		struct MSDU_INFO *prMsduInfo,
 		uint16_t u2RateCode,
 		uint8_t ucBandwidth,

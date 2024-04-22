@@ -1146,7 +1146,7 @@ enum NIC_CAPABILITY_V2_TAG {
 	TAG_CAP_6G_CAP = 0x18,
 #endif
 	TAG_CAP_HOST_STATUS_EMI_OFFSET = 0x19,
-#if CFG_MSCS_SUPPORT
+#if CFG_FAST_PATH_SUPPORT
 	TAG_CAP_FAST_PATH = 0x1a,
 #endif
 #if (CFG_SUPPORT_RX_QUOTA_INFO == 1)
@@ -1251,11 +1251,21 @@ struct CAP_MAC_ADDR {
 	uint8_t aucReserved[2];
 };
 
+enum ENUM_CAP_PHY_MAX_BW {
+	CAP_PHY_MAX_BW20, /* support 20 MHZ */
+	CAP_PHY_MAX_BW40, /* support 20/40 MHZ */
+	CAP_PHY_MAX_BW80, /* support 20/40/80 MHZ */
+	CAP_PHY_MAX_BW160, /* support 20/40/80/160 MHZ */
+	CAP_PHY_MAX_BW8080, /* support 20/40/80/160/8080 MHZ */
+	CAP_PHY_MAX_BW320, /* support 20/40/80/160/8080/320 MHZ */
+	CAP_PHY_MAX_BW_NUM,
+};
+
 struct CAP_PHY_CAP {
 	uint8_t ucHt; /* 1:support, 0:not*/
 	uint8_t ucVht; /* 1:support, 0:not*/
 	uint8_t uc5gBand; /* 1:support, 0:not*/
-	/* 0: BW20, 1:BW40, 2:BW80, 3:BW160, 4:BW80+80 */
+	/* 0: BW20, 1:BW40, 2:BW80, 3:BW160, 4:BW80+80, 5:BW320 */
 	uint8_t ucMaxBandwidth;
 	uint8_t ucNss; /* 1:1x1, 2:2x2, ... */
 	uint8_t ucDbdc; /* 1:support, 0:not*/
@@ -3907,9 +3917,10 @@ enum _ENUM_NAN_SUB_CMD {
 	NAN_CMD_UPDATE_POTENTIAL_CHNL_LIST,
 	NAN_CMD_UPDATE_AVAILABILITY_CTRL,
 	NAN_CMD_UPDATE_PEER_CAPABILITY,
-	NAN_CMD_ADD_CSID,
+	NAN_CMD_ADD_CSID, /* 25 */
 	NAN_CMD_MANAGE_SCID,
-
+	NAN_CMD_CHANGE_ADDRESS,
+	NAN_CMD_SET_SCHED_VERSION,
 	NAN_CMD_NUM
 };
 
@@ -3937,6 +3948,8 @@ enum _ENUM_NAN_SUB_EVENT {
 	NAN_EVENT_ID_DE_EVENT_IND,	/* 20 */
 	NAN_EVENT_SELF_FOLLOW_EVENT,
 	NAN_EVENT_DISABLE_IND,
+	NAN_EVENT_NDL_FLOW_CTRL_V2,
+	NAN_EVENT_ID_DEVICE_CAPABILITY,
 
 	NAN_EVENT_NUM
 };
@@ -4192,6 +4205,10 @@ void nicCmdEventQueryLinkQuality(struct ADAPTER
 				 *prAdapter, struct CMD_INFO *prCmdInfo,
 				 uint8_t *pucEventBuf);
 
+void nicUpdateStatistics(struct ADAPTER *prAdapter,
+	struct PARAM_802_11_STATISTICS_STRUCT *prStatistics,
+	struct EVENT_STATISTICS *prEventStatistics
+);
 void nicCmdEventQueryStatistics(struct ADAPTER
 				*prAdapter, struct CMD_INFO *prCmdInfo,
 				uint8_t *pucEventBuf);
@@ -4233,6 +4250,11 @@ void nicOidCmdEnterRFTestTimeout(struct ADAPTER
 void nicCmdEventBuildDateCode(struct ADAPTER *prAdapter,
 	struct CMD_INFO *prCmdInfo, uint8_t *pucEventBuf);
 #endif
+
+void nicUpdateStaStats(struct ADAPTER *prAdapter,
+	struct EVENT_STA_STATISTICS *prEvent,
+	struct PARAM_GET_STA_STATISTICS *prStaStatistics,
+	uint8_t ucStaRecIdx);
 
 void nicCmdEventQueryStaStatistics(struct ADAPTER
 				   *prAdapter, struct CMD_INFO *prCmdInfo,
@@ -4482,6 +4504,8 @@ void nicNanTestQueryInfoDone(struct ADAPTER *prAdapter,
 			     uint8_t *pucEventBuf);
 void nicNanEventSTATxCTL(struct ADAPTER *prAdapter, uint8_t *pcuEvtBuf);
 void nicNanNdlFlowCtrlEvt(struct ADAPTER *prAdapter, uint8_t *pcuEvtBuf);
+void nicNanNdlFlowCtrlEvtV2(struct ADAPTER *prAdapter,
+	uint8_t *pcuEvtBuf);
 void nicNanVendorEventHandler(struct ADAPTER *prAdapter,
 			      struct WIFI_EVENT *prEvent);
 #endif

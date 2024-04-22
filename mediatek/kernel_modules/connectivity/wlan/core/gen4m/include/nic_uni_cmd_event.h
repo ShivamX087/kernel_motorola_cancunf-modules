@@ -673,7 +673,9 @@ struct UNI_CMD_BSSINFO_STA_PM_ENABLE {
 	uint16_t u2Length;
 	uint16_t u2BcnInterval;
 	uint8_t  ucDtimPeriod;
-	uint8_t  aucPadding[1];
+	uint8_t  ucBmpDeliveryAC;
+	uint8_t  ucBmpTriggerAC;
+	uint8_t  aucPadding[3];
 } __KAL_ATTRIB_PACKED__;
 
 /* BssInfo IFS time information (Tag 0x17) */
@@ -2073,6 +2075,9 @@ enum ENUM_UNI_CMD_IDC_TAG {
 	UNI_CMD_IDC_TAG_ALWAYS_SCAN_PARAM_SETTING = 1,
 	UNI_CMD_IDC_TAG_CCCI_MSG = 2,
 	UNI_CMD_IDC_TAG_3WIRE_GROUP = 3,
+#if CFG_SUPPORT_IDC_RIL_BRIDGE
+	UNI_CMD_IDC_TAG_RIL_BRIDGE = 4,
+#endif
 	UNI_CMD_IDC_TAG_NUM
 };
 
@@ -2091,6 +2096,20 @@ struct UNI_CMD_ALWAYS_SCAN_PARAM_SETTING {
 	uint8_t  fgAlwaysScanEnable;
 	uint8_t     aucReserved[3];
 } __KAL_ATTRIB_PACKED__;
+
+#if CFG_SUPPORT_IDC_RIL_BRIDGE
+/* IDC Setting (Tag4) */
+__KAL_ATTRIB_PACKED_FRONT__
+struct UNI_CMD_RIL_BRIDGE {
+	uint16_t   u2Tag;
+	uint16_t   u2Length;
+	uint8_t    ucRat; /* LTE or NR */
+	uint8_t    fgIsChannelSelectByAcs;
+	uint8_t    aucReserved1[2];
+	uint32_t   u4Band;
+	uint32_t   u4Channel;
+} __KAL_ATTRIB_PACKED__;
+#endif
 
 __KAL_ATTRIB_PACKED_FRONT__
 struct UNI_CMD_SCAN {
@@ -2407,7 +2426,9 @@ struct UNI_CMD_P2P {
 	*   ---------------------------|------|--------------
 	*   UNI_CMD_SET_NOA_PARAM      | 0x00 | UNI_CMD_SET_NOA_PARAM_T
 	*   UNI_CMD_SET_OPPPS_PARAM    | 0x01 | UNI_CMD_SET_OPPPS_PARAM_T
-	*   UNI_CMD_SET_GC_CSA_PARAM   | 0x02 | UNI_CMD_SET_GC_CSA_PARAM_T
+	*   UNI_CMD_SET_LO_START       | 0x02 | UNI_CMD_SET_LO_START_PARAM_T
+	*   UNI_CMD_SET_LO_STOP        | 0x03 | UNI_CMD_SET_LO_STOP_PARAM_T
+	*   UNI_CMD_SET_GC_CSA_PARAM   | 0x04 | UNI_CMD_SET_GC_CSA_PARAM_T
 	*/
 } __KAL_ATTRIB_PACKED__;
 
@@ -2415,7 +2436,9 @@ struct UNI_CMD_P2P {
 enum ENUM_UNI_CMD_P2P_TAG {
 	UNI_CMD_P2P_TAG_SET_NOA_PARAM = 0,
 	UNI_CMD_P2P_TAG_SET_OPPPS_PARAM = 1,
-	UNI_CMD_P2P_TAG_SET_GC_CSA_PARAM = 2,
+	UNI_CMD_P2P_TAG_SET_LO_START = 2,
+	UNI_CMD_P2P_TAG_SET_LO_STOP = 3,
+	UNI_CMD_P2P_TAG_SET_GC_CSA_PARAM = 4,
 	UNI_CMD_P2P_TAG_NUM
 };
 
@@ -2441,7 +2464,32 @@ struct UNI_CMD_SET_OPPPS_PARAM {
 	uint8_t  aucReserved[3];
 } __KAL_ATTRIB_PACKED__;
 
-/* Set GC CSA parameters (Tag2) */
+/* Set listen offload start parameters (Tag2) */
+__KAL_ATTRIB_PACKED_FRONT__
+struct UNI_CMD_SET_P2P_LO_START_PARAM {
+	uint16_t u2Tag;
+	uint16_t u2Length;
+	uint8_t ucBssIndex;
+	uint8_t aucReserved1[3];
+	uint16_t u2ListenPrimaryCh;
+	uint16_t u2Period;
+	uint16_t u2Interval;
+	uint16_t u2Count;
+	uint32_t u4IELen;
+	uint8_t aucReserved2[8];
+	uint8_t aucIE[0];
+} __KAL_ATTRIB_PACKED__;
+
+/* Set listen offload stop parameters (Tag3) */
+__KAL_ATTRIB_PACKED_FRONT__
+struct UNI_CMD_SET_P2P_LO_STOP_PARAM {
+	uint16_t u2Tag;
+	uint16_t u2Length;
+	uint8_t ucBssIndex;
+	uint8_t aucReserved[3];
+} __KAL_ATTRIB_PACKED__;
+
+/* Set GC CSA parameters (Tag4) */
 __KAL_ATTRIB_PACKED_FRONT__
 struct UNI_CMD_SET_GC_CSA_PARAM {
 	uint16_t u2Tag;
@@ -4147,6 +4195,7 @@ enum ENUM_UNI_CMD_NAN_TAG {
 	UNI_CMD_NAN_TAG_ADD_CSID = 22,
 	UNI_CMD_NAN_TAG_MANAGE_SCID = 23,
 	UNI_CMD_NAN_TAG_CHANGE_ADDRESS = 24,
+	UNI_CMD_NAN_TAG_SET_SCHED_VERSION = 25,
 	UNI_CMD_NAN_TAG_MAX_NUM
 };
 
@@ -4439,7 +4488,7 @@ struct UNI_CMD_GAMING_MODE_PROCESS_T {
 	uint8_t aucReserved[2];
 } __KAL_ATTRIB_PACKED__;
 
-#if CFG_MSCS_SUPPORT
+#if CFG_FAST_PATH_SUPPORT
 /* Fast Path command (0x54) */
 struct UNI_CMD_FAST_PATH {
 	/* fixed field */
@@ -4584,6 +4633,7 @@ enum ENUM_UNI_EVENT_ID {
 	UNI_EVENT_ID_WOW	     = 0x5B,
 	UNI_EVENT_ID_GET_VOLT_INFO   = 0x5C,
 	UNI_EVENT_ID_PKT_OFLD	     = 0x60,
+	UNI_EVENT_ID_DELAY_BAR       = 0x61,
 	UNI_EVENT_ID_NUM
 };
 
@@ -5379,6 +5429,7 @@ __KAL_ATTRIB_PACKED_FRONT__
 struct UNI_EVENT_BASIC_STATISTICS {
 	uint16_t     u2Tag;
 	uint16_t     u2Length;
+	uint32_t     u4HwMacAwakeDuration; /* SlotIdleHwAwake */
 	uint64_t     u8TransmittedFragmentCount;
 	uint64_t     u8MulticastTransmittedFrameCount;
 	uint64_t     u8FailedCount;
@@ -5393,7 +5444,6 @@ struct UNI_EVENT_BASIC_STATISTICS {
 	uint64_t     u8FCSErrorCount;
 	uint64_t     u8MdrdyCnt;
 	uint64_t     u8ChnlIdleCnt;
-	uint32_t     u4HwMacAwakeDuration; /* SlotIdleHwAwake */
 } __KAL_ATTRIB_PACKED__;
 
 __KAL_ATTRIB_PACKED_FRONT__
@@ -5496,13 +5546,6 @@ struct UNI_EVENT_STA_STATISTICS {
 } __KAL_ATTRIB_PACKED__;
 
 __KAL_ATTRIB_PACKED_FRONT__
-struct UNI_EVENT_GET_STATISTICS {
-	uint16_t u2Tag;
-	uint16_t u2Length;
-	uint8_t  aucBuffer[0];
-} __KAL_ATTRIB_PACKED__;
-
-__KAL_ATTRIB_PACKED_FRONT__
 struct UNI_EVENT_LINK_STATS {
 	uint16_t u2Tag;
 	uint16_t u2Length;
@@ -5599,14 +5642,16 @@ struct UNI_EVENT_P2P {
 	*                TAG              | ID  | structure
 	*   ------------------------------| ----| -------------
 	*   UNI_EVENT_UPDATE_NOA_PARAM    | 0x00| UNI_EVENT_UPDATE_NOA_PARAM_T
-	*   UNI_EVENT_GC_CSA_PARAM        | 0x01| UNI_EVENT_GC_CSA_PARAM_T
+	*   UNI_EVENT_LO_STOP_PARAM       | 0x01| UNI_EVENT_LO_STOP_PARAM_T
+	*   UNI_EVENT_GC_CSA_PARAM        | 0x02| UNI_EVENT_GC_CSA_PARAM_T
 	*/
 } __KAL_ATTRIB_PACKED__;
 
 /* P2P event Tag */
 enum ENUM_UNI_EVENT_P2P_TAG {
 	UNI_EVENT_P2P_TAG_UPDATE_NOA_PARAM = 0,
-	UNI_EVENT_P2P_TAG_GC_CSA_PARAM = 1,
+	UNI_EVENT_P2P_TAG_LO_STOP_PARAM = 1,
+	UNI_EVENT_P2P_TAG_GC_CSA_PARAM = 2,
 	UNI_EVENT_P2P_TAG_NUM
 };
 
@@ -5645,6 +5690,18 @@ struct UNI_EVENT_GC_CSA_PARAM {
 	uint8_t ucChannel;
 	uint8_t ucBand;
 	uint8_t aucReserved[1];
+} __KAL_ATTRIB_PACKED__;
+
+__KAL_ATTRIB_PACKED_FRONT__
+struct UNI_EVENT_P2P_LO_STOP_PARAM {
+	uint16_t u2Tag;
+	uint16_t u2Length;
+	uint8_t ucBssIndex;
+	uint8_t aucReserved1[3];
+	uint16_t u2ListenCount;
+	uint8_t aucReserved2[2];
+	uint32_t u4Reason;
+	uint8_t aucReserved3[8];
 } __KAL_ATTRIB_PACKED__;
 
 __KAL_ATTRIB_PACKED_FRONT__
@@ -6635,6 +6692,8 @@ enum ENUM_UNI_EVENT_NAN_TAG {
 	UNI_EVENT_NAN_TAG_ID_DE_EVENT_IND = 19,
 	UNI_EVENT_NAN_TAG_SELF_FOLLOW_EVENT = 20,
 	UNI_EVENT_NAN_TAG_DISABLE_IND = 21,
+	UNI_EVENT_NAN_TAG_NDL_FLOW_CTRL_V2 = 22,
+	UNI_EVENT_NAN_TAG_ID_DEVICE_CAPABILITY = 23,
 	UNI_EVENT_NAN_TAG_NUM
 };
 
@@ -6791,7 +6850,42 @@ struct UNI_EVENT_PKT_OFLD {
 
 #endif
 
-#if CFG_MSCS_SUPPORT
+#if CFG_SUPPORT_BAR_DELAY_INDICATION
+struct UNI_EVENT_DELAY_BAR {
+	/* fixed field */
+	uint8_t aucPadding[4];
+
+	/* tlv */
+	uint8_t aucTlvBuffer[0];
+};
+
+/* Delay Bar event tag */
+enum UNI_EVENT_DELAY_BAR_TAG {
+	UNI_EVENT_DELAY_BAR_INFO_TAG = 0,
+	UNI_EVENT_DELAY_BAR_TAG_NUM
+};
+
+struct UNI_STORED_BAR_INFO {
+	uint16_t u2SSN;
+	uint8_t ucTid;
+	uint8_t ucStaRecIdx;
+	uint8_t ucStoredBARCount;
+	uint8_t aucPadding[3];
+};
+
+struct UNI_EVENT_DELAY_BAR_INFO {
+	uint16_t u2Tag;
+	uint16_t u2Length;
+	/* event body */
+	uint8_t ucEvtVer;
+	uint8_t ucBaNum;
+	uint8_t aucPadding[2];
+	struct UNI_STORED_BAR_INFO
+		arBAR[BAR_DELAY_INDICATION_BA_MAX];
+};
+#endif /* CFG_SUPPORT_BAR_DELAY_INDICATION */
+
+#if CFG_FAST_PATH_SUPPORT
 /** This structure is used for UNI_EVENT_ID_FAST_PATH event (0x54)
  *
  * @version Supported from ver:1.0.0.0
@@ -6833,7 +6927,7 @@ struct UNI_EVENT_FAST_PATH_PROCESS_T {
 	uint8_t ucKeynum;
 	uint8_t u4KeybitmapMatchStatus;
 } __KAL_ATTRIB_PACKED__;
-#endif /* CFG_MSCS_SUPPORT */
+#endif /* CFG_FAST_PATH_SUPPORT */
 
 /*******************************************************************************
  *                            P U B L I C   D A T A
@@ -7054,6 +7148,10 @@ uint32_t nicUniCmdOffloadIPV6(struct ADAPTER *ad,
 		struct WIFI_UNI_SETQUERY_INFO *info);
 uint32_t nicUniCmdGetIdcChnl(struct ADAPTER *ad,
 		struct WIFI_UNI_SETQUERY_INFO *info);
+#if CFG_SUPPORT_IDC_RIL_BRIDGE
+uint32_t nicUniCmdSetIdcRilBridge(struct ADAPTER *ad,
+		struct WIFI_UNI_SETQUERY_INFO *info);
+#endif
 uint32_t nicUniCmdSetSGParam(struct ADAPTER *ad,
 		struct WIFI_UNI_SETQUERY_INFO *info);
 uint32_t nicUniCmdSetMonitor(struct ADAPTER *ad,
@@ -7081,6 +7179,10 @@ uint32_t nicUniCmdSetP2pNoa(struct ADAPTER *ad,
 uint32_t nicUniCmdSetP2pOppps(struct ADAPTER *ad,
 		struct WIFI_UNI_SETQUERY_INFO *info);
 uint32_t nicUniCmdSetP2pGcCsa(struct ADAPTER *ad,
+		struct WIFI_UNI_SETQUERY_INFO *info);
+uint32_t nicUniCmdSetP2pLoStart(struct ADAPTER *ad,
+		struct WIFI_UNI_SETQUERY_INFO *info);
+uint32_t nicUniCmdSetP2pLoStop(struct ADAPTER *ad,
 		struct WIFI_UNI_SETQUERY_INFO *info);
 uint32_t nicUniCmdGetStaStatistics(struct ADAPTER *ad,
 		struct WIFI_UNI_SETQUERY_INFO *info);
@@ -7223,6 +7325,11 @@ void nicUniEventStatistics(struct ADAPTER
 	*prAdapter, struct CMD_INFO *prCmdInfo, uint8_t *pucEventBuf);
 void nicUniEventLinkQuality(struct ADAPTER
 	*prAdapter, struct CMD_INFO *prCmdInfo, uint8_t *pucEventBuf);
+
+#if (CFG_SUPPORT_STATS_ONE_CMD == 1)
+void nicUniEventAllStatsOneCmd(struct ADAPTER
+	*prAdapter, struct CMD_INFO *prCmdInfo, uint8_t *pucEventBuf);
+#endif
 void nicUniEventQueryRfTestATInfo(struct ADAPTER
 	*prAdapter, struct CMD_INFO *prCmdInfo, uint8_t *pucEventBuf);
 void nicUniEventQueryRxStatAll(struct ADAPTER
@@ -7329,6 +7436,10 @@ void nicUniUnsolicitStatsEvt(struct ADAPTER *ad,
 void nicUniEventGetVnf(struct ADAPTER *ad,
 	struct WIFI_UNI_EVENT *evt);
 #endif
+#if CFG_SUPPORT_BAR_DELAY_INDICATION
+void nicUniEventDelayBar(struct ADAPTER *ad,
+	struct WIFI_UNI_EVENT *evt);
+#endif /* CFG_SUPPORT_BAR_DELAY_INDICATION */
 void nicUniEventFastPath(struct ADAPTER *ad,
 	struct WIFI_UNI_EVENT *evt);
 void nicUniEventThermalProtect(struct ADAPTER *ad,

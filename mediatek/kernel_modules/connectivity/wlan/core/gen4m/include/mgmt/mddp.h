@@ -44,7 +44,7 @@
 #define MD_LPCTL_ADDR 0x7C060050
 #else
 #define MD_STATUS_SYNC_CR 0x1800701C
-#define MD_LPCTL_ADDR 0x7C007030
+#define MD_LPCTL_ADDR 0x7030
 #endif
 #define MD_STATUS_INIT_SYNC_BIT BIT(0)
 #define MD_STATUS_OFF_SYNC_BIT  BIT(1)
@@ -154,6 +154,7 @@ void mddpMdStateChangedCb(enum MD_STATE old_state,
 #endif
 void mddpSetMDFwOwn(void);
 u_int8_t mddpIsMDFwOwn(void);
+void mddpEnableMddpSupport(void);
 void mddpDisableMddpSupport(void);
 bool mddpIsSupportMcifWifi(void);
 bool mddpIsSupportMddpWh(void);

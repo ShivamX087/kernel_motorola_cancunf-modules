@@ -2205,6 +2205,7 @@ static void handle_wfsys_reset(struct ADAPTER *prAdapter)
 {
 	struct CHIP_DBG_OPS *dbg_ops = prAdapter->chip_info->prDebugOps;
 
+	wifi_coredump_set_enable(TRUE);
 	if (kalIsResetting()) {
 		DBGLOG(HAL, INFO,
 			"Wi-Fi Driver trigger, need do complete.\n");
@@ -2234,6 +2235,7 @@ static void handle_whole_chip_reset(struct ADAPTER *prAdapter)
 	DBGLOG(HAL, ERROR,
 		"FW trigger whole chip reset.\n");
 
+	wifi_coredump_set_enable(TRUE);
 	g_Coredump_source = COREDUMP_SOURCE_WF_FW;
 	glResetUpdateFlag(TRUE);
 	g_IsWfsysBusHang = TRUE;
@@ -2535,9 +2537,9 @@ static void register_connv3_cbs(void)
 #if (CFG_SUPPORT_PRE_ON_PHY_ACTION == 1)
 	cb.pre_cal_cb.pre_on_cb = wlan_pre_pwr_on;
 	cb.pre_cal_cb.efuse_on_cb = wlan_efuse_on;
-	cb.pre_cal_cb.pwr_on_cb = wlanPreCalPwrOn;
-	cb.pre_cal_cb.do_cal_cb = wlanPreCal;
-	cb.pre_cal_cb.pre_cal_error = wlanPreCalErr;
+	cb.pre_cal_cb.pwr_on_cb = wlan_precal_pwron_v2;
+	cb.pre_cal_cb.do_cal_cb = wlan_precal_docal_v2;
+	cb.pre_cal_cb.pre_cal_error = wlan_precal_err;
 #endif
 
 	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);

@@ -249,9 +249,6 @@ uint8_t kalP2PGetWscMode(struct GLUE_INFO *prGlueInfo);
 #define kalP2PIsTxCarrierOn(_prGlueInfo, _prBssInfo) \
 		KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo)
 
-#define kalP2PEnableNetDev(_prGlueInfo, _prBssInfo) \
-	KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo)
-
 #define kalP2PUpdateP2P_IE(_prGlueInfo, _ucIndex, _pucBuffer, \
 	_u2BufferLength, _ucRoleIdx) \
 	KAL_NEED_IMPLEMENT(__FILE__, __func__, __LINE__, _prGlueInfo)
@@ -284,9 +281,6 @@ void kalP2PTxCarrierOn(struct GLUE_INFO *prGlueInfo,
 		struct BSS_INFO *prBssInfo);
 
 u_int8_t kalP2PIsTxCarrierOn(struct GLUE_INFO *prGlueInfo,
-		struct BSS_INFO *prBssInfo);
-
-void kalP2PEnableNetDev(struct GLUE_INFO *prGlueInfo,
 		struct BSS_INFO *prBssInfo);
 
 void kalP2PUpdateP2P_IE(struct GLUE_INFO *prGlueInfo,
@@ -332,6 +326,18 @@ kalGetChnlList(struct GLUE_INFO *prGlueInfo,
 void kalP2PIndicateSecCheckRsp(struct GLUE_INFO *prGlueInfo,
 		uint8_t *pucRsp,
 		uint16_t u2RspLen);
+#endif
+
+#if CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY
+void kalIdcRegisterRilNotifier(void);
+void kalIdcUnregisterRilNotifier(void);
+#endif
+#if CFG_SUPPORT_IDC_RIL_BRIDGE
+void kalSetRilBridgeChannelInfo(
+	struct ADAPTER *prAdapter,
+	uint8_t ucRat,
+	uint32_t u4Band,
+	uint32_t u4Channel);
 #endif
 
 /******************************************************************************
@@ -530,6 +536,10 @@ void kalP2pIndicateAcsResult(struct GLUE_INFO *prGlueInfo,
 		uint8_t ucSeg1Ch,
 		enum ENUM_MAX_BANDWIDTH_SETTING eChnlBw,
 		enum P2P_VENDOR_ACS_HW_MODE eHwMode);
+
+void kalP2pIndicateListenOffloadEvent(
+	struct GLUE_INFO *prGlueInfo,
+	uint32_t event);
 
 void kalP2pIndicateRadarEvent(struct GLUE_INFO *prGlueInfo,
 		uint8_t ucRoleIndex,

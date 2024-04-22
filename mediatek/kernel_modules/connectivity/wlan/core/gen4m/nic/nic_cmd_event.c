@@ -156,7 +156,7 @@ const struct NIC_CAPABILITY_V2_REF_TABLE
 #endif
 	NIC_FILL_CAP_V2_REF_TBL(TAG_CAP_HOST_SUSPEND_INFO,
 				nicCmdEventHostSuspendInfo),
-#if CFG_MSCS_SUPPORT
+#if CFG_FAST_PATH_SUPPORT
 	NIC_FILL_CAP_V2_REF_TBL(TAG_CAP_FAST_PATH, nicCfgChipCapFastPath),
 #endif
 #if CFG_SUPPORT_MLR
@@ -948,31 +948,15 @@ void nicCmdEventQueryLinkQuality(struct ADAPTER *prAdapter,
 		u4QueryInfoLen, WLAN_STATUS_SUCCESS);
 }
 
-void nicCmdEventQueryStatistics(struct ADAPTER
-				*prAdapter, struct CMD_INFO *prCmdInfo,
-				uint8_t *pucEventBuf)
+void nicUpdateStatistics(struct ADAPTER *prAdapter,
+	struct PARAM_802_11_STATISTICS_STRUCT *prStatistics,
+	struct EVENT_STATISTICS *prEventStatistics
+)
 {
-	struct PARAM_802_11_STATISTICS_STRUCT *prStatistics;
-	struct EVENT_STATISTICS *prEventStatistics;
-	struct GLUE_INFO *prGlueInfo;
-	uint32_t u4QueryInfoLen;
 #if CFG_SUPPORT_LINK_QUALITY_MONITOR
 	struct WIFI_LINK_QUALITY_INFO *prLinkQualityInfo;
 	struct SCAN_INFO *prScanInfo;
 #endif
-
-	ASSERT(prAdapter);
-	ASSERT(prCmdInfo);
-
-	prEventStatistics = (struct EVENT_STATISTICS *) pucEventBuf;
-
-	prGlueInfo = prAdapter->prGlueInfo;
-
-	u4QueryInfoLen = sizeof(struct
-				PARAM_802_11_STATISTICS_STRUCT);
-	prStatistics = (struct PARAM_802_11_STATISTICS_STRUCT *)
-		       prCmdInfo->pvInformationBuffer;
-
 	prStatistics->rTransmittedFragmentCount =
 		prEventStatistics->rTransmittedFragmentCount;
 	prStatistics->rMulticastTransmittedFrameCount =
@@ -1035,7 +1019,7 @@ void nicCmdEventQueryStatistics(struct ADAPTER
 	else
 		prLinkQualityInfo->u2FlagScanning = 0;
 
-	wlanFinishCollectingLinkQuality(prGlueInfo);
+	wlanFinishCollectingLinkQuality(prAdapter->prGlueInfo);
 
 	DBGLOG(SW4, TRACE,
 		   "EVENT_STATISTICS: rTransmittedFragmentCount.QuadPart:%lld, rRetryCount.QuadPart:%lld, rRTSFailureCount.QuadPart:%lld, rACKFailureCount.QuadPart:%lld, rReceivedFragmentCount.QuadPart:%lld, rFCSErrorCount.QuadPart:%lld, rChnlIdleCnt.QuadPart:%lld\n",
@@ -1048,6 +1032,32 @@ void nicCmdEventQueryStatistics(struct ADAPTER
 		   prEventStatistics->rChnlIdleCnt.QuadPart
 	);
 #endif
+}
+
+void nicCmdEventQueryStatistics(struct ADAPTER
+				*prAdapter, struct CMD_INFO *prCmdInfo,
+				uint8_t *pucEventBuf)
+{
+	struct PARAM_802_11_STATISTICS_STRUCT *prStatistics;
+	struct EVENT_STATISTICS *prEventStatistics;
+	struct GLUE_INFO *prGlueInfo;
+	uint32_t u4QueryInfoLen;
+
+
+	ASSERT(prAdapter);
+	ASSERT(prCmdInfo);
+
+	prEventStatistics = (struct EVENT_STATISTICS *) pucEventBuf;
+
+	prGlueInfo = prAdapter->prGlueInfo;
+
+	u4QueryInfoLen = sizeof(struct
+				PARAM_802_11_STATISTICS_STRUCT);
+	prStatistics = (struct PARAM_802_11_STATISTICS_STRUCT *)
+		       prCmdInfo->pvInformationBuffer;
+
+	nicUpdateStatistics(prAdapter, prStatistics,
+		prEventStatistics);
 
 	if (prCmdInfo->fgIsOid)
 		kalOidComplete(prGlueInfo, prCmdInfo,
@@ -1784,45 +1794,17 @@ void nicCmdEventBuildDateCode(struct ADAPTER *prAdapter,
 }
 #endif
 
-/*----------------------------------------------------------------------------*/
-/*!
- * @brief This function is called when event for query STA link status
- *        has been retrieved
- *
- * @param prAdapter          Pointer to the Adapter structure.
- * @param prCmdInfo          Pointer to the command information
- * @param pucEventBuf        Pointer to the event buffer
- *
- * @return none
- *
- */
-/*----------------------------------------------------------------------------*/
-void nicCmdEventQueryStaStatistics(struct ADAPTER
-				   *prAdapter, struct CMD_INFO *prCmdInfo,
-				   uint8_t *pucEventBuf)
+void nicUpdateStaStats(struct ADAPTER *prAdapter,
+	struct EVENT_STA_STATISTICS *prEvent,
+	struct PARAM_GET_STA_STATISTICS *prStaStatistics,
+	uint8_t ucStaRecIdx)
 {
-	uint32_t u4QueryInfoLen;
-	struct EVENT_STA_STATISTICS *prEvent;
-	struct GLUE_INFO *prGlueInfo;
-	struct PARAM_GET_STA_STATISTICS *prStaStatistics;
 	enum ENUM_WMM_ACI eAci;
 	struct STA_RECORD *prStaRec;
 	uint8_t ucDbdcIdx, ucIdx;
 #if CFG_SUPPORT_LINK_QUALITY_MONITOR
 	struct WIFI_LINK_QUALITY_INFO *prLinkQualityInfo;
 #endif
-
-	ASSERT(prAdapter);
-	ASSERT(prCmdInfo);
-	ASSERT(pucEventBuf);
-	ASSERT(prCmdInfo->pvInformationBuffer);
-
-	prGlueInfo = prAdapter->prGlueInfo;
-	prEvent = (struct EVENT_STA_STATISTICS *) pucEventBuf;
-	prStaStatistics = (struct PARAM_GET_STA_STATISTICS *)
-			  prCmdInfo->pvInformationBuffer;
-
-	u4QueryInfoLen = sizeof(struct PARAM_GET_STA_STATISTICS);
 
 	/* Statistics from FW is valid */
 	if (prEvent->u4Flags & BIT(0)) {
@@ -1968,7 +1950,7 @@ void nicCmdEventQueryStaStatistics(struct ADAPTER
 			prEvent->ucVhtNonSpRateState;
 #endif
 		prStaRec = cnmGetStaRecByIndex(prAdapter,
-					       prEvent->ucStaRecIdx);
+					       ucStaRecIdx);
 
 		if (prStaRec) {
 			/*link layer statistics */
@@ -2056,7 +2038,7 @@ void nicCmdEventQueryStaStatistics(struct ADAPTER
 			log_dbg(P2P, INFO,
 				"[%u][%u] link_score=%u, rssi=%u, rate=%u, threshold_cnt=%u, fail_cnt=%u\n",
 				prEvent->ucNetworkTypeIndex,
-				prEvent->ucStaRecIdx,
+				ucStaRecIdx,
 				u4LinkScore,
 				prStaStatistics->ucRcpi,
 				prStaStatistics->u2LinkSpeed,
@@ -2071,10 +2053,63 @@ void nicCmdEventQueryStaStatistics(struct ADAPTER
 #endif
 #endif
 #if CFG_SUPPORT_LINK_QUALITY_MONITOR
-		prLinkQualityInfo = &(prAdapter->rLinkQualityInfo);
-		prLinkQualityInfo->u4CurTxRate = prEvent->u2LinkSpeed * 5;
+		if (prStaRec &&
+			prStaRec->ucBssIndex == aisGetDefaultLinkBssIndex(
+				prAdapter)) {
+			/* only update linkQuality for default link bss */
+			prLinkQualityInfo = &(prAdapter->rLinkQualityInfo);
+			prLinkQualityInfo->u4CurTxRate = (
+				prEvent->u2LinkSpeed * 5);
+			DBGLOG(REQ, TRACE, "ucBssIndex=%u txRate:%u\n",
+				prStaRec->ucBssIndex, prLinkQualityInfo->u4CurTxRate);
+		}
 #endif
 	}
+}
+
+/*----------------------------------------------------------------------------*/
+/*!
+ * @brief This function is called when event for query STA link status
+ *        has been retrieved
+ *
+ * @param prAdapter          Pointer to the Adapter structure.
+ * @param prCmdInfo          Pointer to the command information
+ * @param pucEventBuf        Pointer to the event buffer
+ *
+ * @return none
+ *
+ */
+/*----------------------------------------------------------------------------*/
+void nicCmdEventQueryStaStatistics(struct ADAPTER
+				   *prAdapter, struct CMD_INFO *prCmdInfo,
+				   uint8_t *pucEventBuf)
+{
+	uint8_t ucStaRecIdx;
+	uint32_t u4QueryInfoLen;
+	struct EVENT_STA_STATISTICS *prEvent;
+	struct GLUE_INFO *prGlueInfo;
+	struct PARAM_GET_STA_STATISTICS *prStaStatistics;
+
+	ASSERT(prAdapter);
+	ASSERT(prCmdInfo);
+	ASSERT(pucEventBuf);
+	ASSERT(prCmdInfo->pvInformationBuffer);
+
+	prGlueInfo = prAdapter->prGlueInfo;
+	prEvent = (struct EVENT_STA_STATISTICS *) pucEventBuf;
+	prStaStatistics = (struct PARAM_GET_STA_STATISTICS *)
+			  prCmdInfo->pvInformationBuffer;
+
+	u4QueryInfoLen = sizeof(struct PARAM_GET_STA_STATISTICS);
+
+#ifdef CFG_SUPPORT_UNIFIED_COMMAND
+	ucStaRecIdx = secGetStaIdxByWlanIdx(prAdapter, prEvent->ucStaRecIdx);
+#else
+	ucStaRecIdx = prEvent->ucStaRecIdx;
+#endif
+	if (ucStaRecIdx < CFG_STA_REC_NUM)
+		nicUpdateStaStats(prAdapter, prEvent, prStaStatistics,
+			ucStaRecIdx);
 
 	if (prCmdInfo->fgIsOid)
 		kalOidComplete(prGlueInfo,
@@ -2530,6 +2565,15 @@ uint32_t nicCfgChipCapPhyCap(struct ADAPTER *prAdapter,
 			     uint8_t *pucEventBuf)
 {
 	struct CAP_PHY_CAP *prPhyCap = (struct CAP_PHY_CAP *)pucEventBuf;
+	uint8_t aucCapMaxBw[CAP_PHY_MAX_BW_NUM] = {
+		MAX_BW_20MHZ,
+		MAX_BW_40MHZ,
+		MAX_BW_80MHZ,
+		MAX_BW_160MHZ,
+		MAX_BW_80_80_MHZ,
+		MAX_BW_320_2MHZ,
+	};
+	uint8_t ucMaxBandwidth = MAX_BW_UNKNOWN;
 
 	prAdapter->rWifiVar.ucStaVht &= prPhyCap->ucVht;
 	wlanCfgSetUint32(prAdapter, "StaVHT", prAdapter->rWifiVar.ucStaVht);
@@ -2567,7 +2611,7 @@ uint32_t nicCfgChipCapPhyCap(struct ADAPTER *prAdapter,
 	wlanCfgSetUint32(prAdapter, "StbcTx", prAdapter->rWifiVar.ucTxStbc);
 	prAdapter->rWifiVar.ucRxStbc &= prPhyCap->ucRxStbc;
 	wlanCfgSetUint32(prAdapter, "StbcRx", prAdapter->rWifiVar.ucRxStbc);
-
+	prAdapter->rWifiVar.u4PhyMaxBandwidth = prPhyCap->ucMaxBandwidth;
 
 	if ((prPhyCap->ucWifiPath != 0xF) && (prPhyCap->ucWifiPath != 0x3)) {
 		/* May be legal settings in the future */
@@ -2652,51 +2696,54 @@ uint32_t nicCfgChipCapPhyCap(struct ADAPTER *prAdapter,
 	}
 #endif
 	/* Overwrite bandwidth settings by phy capability */
-	if (prAdapter->rWifiVar.ucStaBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucStaBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prPhyCap->ucMaxBandwidth < CAP_PHY_MAX_BW_NUM)
+		ucMaxBandwidth = aucCapMaxBw[prPhyCap->ucMaxBandwidth];
+
+	if (prAdapter->rWifiVar.ucStaBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucStaBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "StaBw",
 			prAdapter->rWifiVar.ucStaBandwidth);
 	}
 
-	if (prAdapter->rWifiVar.ucSta5gBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucSta5gBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prAdapter->rWifiVar.ucSta5gBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucSta5gBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "Sta5gBw",
 			prAdapter->rWifiVar.ucSta5gBandwidth);
 	}
 
-	if (prAdapter->rWifiVar.ucApBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucApBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prAdapter->rWifiVar.ucApBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucApBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "ApBw",
 			prAdapter->rWifiVar.ucApBandwidth);
 	}
 
-	if (prAdapter->rWifiVar.ucAp5gBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucAp5gBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prAdapter->rWifiVar.ucAp5gBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucAp5gBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "Ap5gBw",
 			prAdapter->rWifiVar.ucAp5gBandwidth);
 	}
 
-	if (prAdapter->rWifiVar.ucP2p5gBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucP2p5gBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prAdapter->rWifiVar.ucP2p5gBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucP2p5gBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "P2p5gBw",
 			prAdapter->rWifiVar.ucP2p5gBandwidth);
 	}
 
 #if (CFG_SUPPORT_WIFI_6G == 1)
-	if (prAdapter->rWifiVar.ucSta6gBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucSta6gBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prAdapter->rWifiVar.ucSta6gBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucSta6gBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "Sta6gBw",
 			prAdapter->rWifiVar.ucSta6gBandwidth);
 	}
 
-	if (prAdapter->rWifiVar.ucAp6gBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucAp6gBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prAdapter->rWifiVar.ucAp6gBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucAp6gBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "Ap6gBw",
 			prAdapter->rWifiVar.ucAp6gBandwidth);
 	}
 
-	if (prAdapter->rWifiVar.ucP2p6gBandwidth > prPhyCap->ucMaxBandwidth) {
-		prAdapter->rWifiVar.ucP2p6gBandwidth = prPhyCap->ucMaxBandwidth;
+	if (prAdapter->rWifiVar.ucP2p6gBandwidth > ucMaxBandwidth) {
+		prAdapter->rWifiVar.ucP2p6gBandwidth = ucMaxBandwidth;
 		wlanCfgSetUint32(prAdapter, "P2p6gBw",
 			prAdapter->rWifiVar.ucP2p6gBandwidth);
 	}
@@ -2704,24 +2751,26 @@ uint32_t nicCfgChipCapPhyCap(struct ADAPTER *prAdapter,
 
 #if (CFG_SUPPORT_802_11BE == 1)
 	DBGLOG(INIT, INFO,
-		"Vht [%u] He[%u] Eht[%u] 5gBand [%d], Nss [%d], Dbdc [%d], bw [%d]\n",
+		"Vht [%u] He[%u] Eht[%u] 5gBand [%d], Nss [%d], Dbdc [%d], bw [%d=>%d]\n",
 			prPhyCap->ucVht,
 			prPhyCap->ucHe,
 			prPhyCap->ucEht,
 			prPhyCap->uc5gBand,
 			prPhyCap->ucNss,
 			prPhyCap->ucDbdc,
-			prPhyCap->ucMaxBandwidth);
+			prPhyCap->ucMaxBandwidth,
+			ucMaxBandwidth);
 #else
 	DBGLOG(INIT, INFO,
-		"Vht [%u] He[%u] Eht[%u] 5gBand [%d], Nss [%d], Dbdc [%d], bw [%d]\n",
+		"Vht [%u] He[%u] Eht[%u] 5gBand [%d], Nss [%d], Dbdc [%d], bw [%d=>%d]\n",
 			prPhyCap->ucVht,
 			prPhyCap->ucHe,
 			0,
 			prPhyCap->uc5gBand,
 			prPhyCap->ucNss,
 			prPhyCap->ucDbdc,
-			prPhyCap->ucMaxBandwidth);
+			prPhyCap->ucMaxBandwidth,
+			ucMaxBandwidth);
 #endif
 
 	DBGLOG(INIT, INFO,
@@ -3003,7 +3052,7 @@ uint32_t nicCmdEventHostSuspendInfo(struct ADAPTER *prAdapter,
 	return WLAN_STATUS_SUCCESS;
 }
 
-#if CFG_MSCS_SUPPORT
+#if CFG_FAST_PATH_SUPPORT
 uint32_t nicCfgChipCapFastPath(struct ADAPTER *prAdapter,
 			       uint8_t *pucEventBuf)
 {
@@ -4475,9 +4524,10 @@ bool nicBeaconTimeoutFilterPolicy(struct ADAPTER *prAdapter,
 	GET_BOOT_SYSTIME(&u4CurrentTime);
 
 	DBGLOG(NIC, INFO,
-			"u4MonitorWindow: %d, u4CurrentTime: %d, u4LastRxTime: %d, u4LastTxTime: %d",
+			"u4MonitorWindow: %d, u4CurrentTime: %d, u4LastRxTime: %d, u4LastUnicastRxTime: %d, u4LastTxTime: %d",
 			u4MonitorWindow, u4CurrentTime,
 			prRxCtrl->u4LastRxTime[ucBssIdx],
+			prRxCtrl->u4LastUnicastRxTime[ucBssIdx],
 			prTxCtrl->u4LastTxTime[ucBssIdx]);
 
 	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIdx);
@@ -5844,6 +5894,64 @@ void nicNanNdlFlowCtrlEvt(struct ADAPTER *prAdapter, uint8_t *pcuEvtBuf)
 	}
 }
 
+void nicNanNdlFlowCtrlEvtV2(struct ADAPTER *prAdapter, uint8_t *pcuEvtBuf)
+{
+	struct NAN_EVT_NDL_FLOW_CTRL_V2 *prFlowCtrlEvt;
+	struct STA_RECORD *prStaRec;
+	uint16_t u2SchId = 0;
+	uint32_t u4Idx;
+	OS_SYSTIME rCurrentTime;
+	OS_SYSTIME rExpiryTime;
+
+	KAL_SPIN_LOCK_DECLARATION();
+
+	prFlowCtrlEvt = (struct NAN_EVT_NDL_FLOW_CTRL_V2 *)pcuEvtBuf;
+	for (u2SchId = 0; u2SchId < NAN_MAX_CONN_CFG; u2SchId++) {
+		uint8_t ucSTAIdx;
+		uint16_t u4RemainingTime;
+
+		if (nanSchedPeerSchRecordIsValid(prAdapter, u2SchId) == FALSE)
+			continue;
+
+		rCurrentTime = kalGetTimeTick();
+		u4RemainingTime = prFlowCtrlEvt->au4RemainingTime[u2SchId];
+		rExpiryTime =
+			rCurrentTime + u4RemainingTime;
+
+		DBGLOG(NAN, INFO,
+		       "[NDL flow control] Sch:%u, Expiry:%u, Remain:%u\n",
+		       u2SchId, rExpiryTime, u4RemainingTime);
+
+		if (u4RemainingTime == 0)
+			continue;
+
+		rExpiryTime -= NAN_SEND_PKT_TIME_GUARD_TIME;
+		for (u4Idx = 0; u4Idx < NAN_MAX_SUPPORT_NDP_CXT_NUM; u4Idx++) {
+			ucSTAIdx = nanSchedQueryStaRecIdx(prAdapter, u2SchId,
+							  u4Idx);
+			if (ucSTAIdx == STA_REC_INDEX_NOT_FOUND)
+				continue;
+
+			KAL_ACQUIRE_SPIN_LOCK(prAdapter,
+				SPIN_LOCK_NAN_NDL_FLOW_CTRL);
+
+			prStaRec = &prAdapter->arStaRec[ucSTAIdx];
+			prStaRec->rNanExpiredSendTime = rExpiryTime;
+
+			if (prStaRec->fgNanSendTimeExpired) {
+				prStaRec->fgNanSendTimeExpired = FALSE;
+
+				DBGLOG(NAN, INFO, "Trigger NAN tx request\n");
+				/* NAN StaRec Start Tx */
+				qmSetStaRecTxAllowed(prAdapter,
+					prStaRec, TRUE);
+			}
+			KAL_RELEASE_SPIN_LOCK(prAdapter,
+					SPIN_LOCK_NAN_NDL_FLOW_CTRL);
+		}
+	}
+}
+
 void nicNanEventDispatcher(struct ADAPTER *prAdapter,
 		      struct WIFI_EVENT *prEvent)
 {
@@ -5904,6 +6012,7 @@ void nicNanIOEventHandler(struct ADAPTER *prAdapter,
 	case UNI_EVENT_NAN_TAG_ID_PEER_AVAILABILITY:
 	case UNI_EVENT_NAN_TAG_ID_PEER_CAPABILITY:
 	case UNI_EVENT_NAN_TAG_ID_CRB_HANDSHAKE_TOKEN:
+	case UNI_EVENT_NAN_TAG_ID_DEVICE_CAPABILITY:
 		nanSchedulerUniEventDispatch(prAdapter, u4SubEvent,
 					  prTlvElement->aucbody);
 		break;
@@ -5928,9 +6037,13 @@ void nicNanIOEventHandler(struct ADAPTER *prAdapter,
 	case UNI_EVENT_NAN_TAG_NDL_FLOW_CTRL:
 		nicNanNdlFlowCtrlEvt(prAdapter, prTlvElement->aucbody);
 		break;
+	case UNI_EVENT_NAN_TAG_NDL_FLOW_CTRL_V2:
+		nicNanNdlFlowCtrlEvtV2(prAdapter, prTlvElement->aucbody);
+		break;
 #endif
 	case UNI_EVENT_NAN_TAG_NDL_DISCONNECT:
 		nanDataEngingDisconnectEvt(prAdapter, prTlvElement->aucbody);
+		break;
 	}
 }
 
@@ -5983,6 +6096,7 @@ void nicNanIOEventHandler(struct ADAPTER *prAdapter,
 	case NAN_EVENT_ID_PEER_AVAILABILITY:
 	case NAN_EVENT_ID_PEER_CAPABILITY:
 	case NAN_EVENT_ID_CRB_HANDSHAKE_TOKEN:
+	case NAN_EVENT_ID_DEVICE_CAPABILITY:
 		nanSchedulerEventDispatch(prAdapter, u4SubEvent,
 					  prTlvElement->aucbody);
 		break;
@@ -6006,6 +6120,9 @@ void nicNanIOEventHandler(struct ADAPTER *prAdapter,
 #if CFG_SUPPORT_NAN_ADVANCE_DATA_CONTROL
 	case NAN_EVENT_NDL_FLOW_CTRL:
 		nicNanNdlFlowCtrlEvt(prAdapter, prTlvElement->aucbody);
+		break;
+	case NAN_EVENT_NDL_FLOW_CTRL_V2:
+		nicNanNdlFlowCtrlEvtV2(prAdapter, prTlvElement->aucbody);
 		break;
 #endif
 	case NAN_EVENT_NDL_DISCONNECT:
@@ -6195,24 +6312,24 @@ void nicEventHandleDelayBar(struct ADAPTER *prAdapter,
 	QUEUE_INITIALIZE(prReturnedQue);
 	for (i = 0; i < prEventStoredBAR->ucBaNum; i++) {
 		/* always add 1 since cnt=0 for 1st stored in fw */
-		prEventStoredBAR->rBAR[i].ucStoredBARCount++;
+		prEventStoredBAR->arBAR[i].ucStoredBARCount++;
 
 		DBGLOG(NIC, INFO,
 			"[Id:StaId:Tid:SSN:StoredCnt]:[%d:%d:%d:%d:%d]\n",
 			i,
-			prEventStoredBAR->rBAR[i].ucStaRecIdx,
-			prEventStoredBAR->rBAR[i].ucTid,
-			prEventStoredBAR->rBAR[i].u2SSN,
-			prEventStoredBAR->rBAR[i].ucStoredBARCount);
+			prEventStoredBAR->arBAR[i].ucStaRecIdx,
+			prEventStoredBAR->arBAR[i].ucTid,
+			prEventStoredBAR->arBAR[i].u2SSN,
+			prEventStoredBAR->arBAR[i].ucStoredBARCount);
 
 		qmHandleRxReorderWinShift(prAdapter,
-			prEventStoredBAR->rBAR[i].ucStaRecIdx,
-			prEventStoredBAR->rBAR[i].ucTid,
-			prEventStoredBAR->rBAR[i].u2SSN,
+			prEventStoredBAR->arBAR[i].ucStaRecIdx,
+			prEventStoredBAR->arBAR[i].ucTid,
+			prEventStoredBAR->arBAR[i].u2SSN,
 			prReturnedQue);
 
 		RX_ADD_CNT(&prAdapter->rRxCtrl, RX_BAR_DELAY_COUNT,
-			prEventStoredBAR->rBAR[i].ucStoredBARCount
+			prEventStoredBAR->arBAR[i].ucStoredBARCount
 			);
 	}
 

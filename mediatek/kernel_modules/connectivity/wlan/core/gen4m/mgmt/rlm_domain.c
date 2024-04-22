@@ -2174,6 +2174,33 @@ uint32_t rlmDomainSupOperatingClassIeFill(uint8_t *pBuf)
 
 /*----------------------------------------------------------------------------*/
 /*!
+ * @brief retrun channel interval
+ *
+ * @param[in] u2SubBandIdx
+ * @param[in] ucCurrCh
+ *
+ * @return channel interval
+ */
+/*----------------------------------------------------------------------------*/
+static uint8_t
+rlmDomainGetChannelInterval(uint16_t u2SubBandIdx,
+			uint8_t ucCurrCh)
+{
+	uint8_t ucInterval = 0;
+
+#if (CFG_SUPPORT_WIFI_6G == 1)
+	if ((g_rRlmSubBand[u2SubBandIdx].eBand == BAND_6G) &&
+		(ucCurrCh == 1 || ucCurrCh == 2))
+		ucInterval = 1;
+	else
+#endif
+		ucInterval =  g_rRlmSubBand[u2SubBandIdx].ucInterval;
+
+	return ucInterval;
+}
+
+/*----------------------------------------------------------------------------*/
+/*!
  * @brief
  *
  * @param[in]
@@ -2200,9 +2227,11 @@ u_int8_t rlmDomainCheckChannelEntryValid(struct ADAPTER *prAdapter,
 	for (i = PWR_LMT_SUBBAND_2G4; i < PWR_LMT_SUBAND_NUM; i++) {
 		if ((eBand == BAND_NULL || eBand == g_rRlmSubBand[i].eBand) &&
 			(ucCentralCh >= g_rRlmSubBand[i].ucStartCh) &&
-			(ucCentralCh <= g_rRlmSubBand[i].ucEndCh))
+			(ucCentralCh <= g_rRlmSubBand[i].ucEndCh)) {
+
 			ucTemp = (ucCentralCh - g_rRlmSubBand[i].ucStartCh) %
-				 g_rRlmSubBand[i].ucInterval;
+			rlmDomainGetChannelInterval(i, ucCentralCh);
+		}
 		if (ucTemp == 0)
 			break;
 	}
@@ -2344,9 +2373,10 @@ rlmDomainIsValidRfSetting(struct ADAPTER *prAdapter,
 			       ucCenterCh);
 
 		/* Check Central Channel Valid or Not */
-	} else if (eChannelWidth == CW_320MHZ) {
+	} else if (eChannelWidth == CW_320_1MHZ ||
+		   eChannelWidth == CW_320_2MHZ) {
 		//TODO: add checking for 320MHZ
-		DBGLOG(RLM, INFO, "CW320\n", eChannelWidth);
+		DBGLOG(RLM, TRACE, "CW320 %d\n", eChannelWidth);
 	} else {
 		DBGLOG(RLM, ERROR, "Wrong BW =%d\n", eChannelWidth);
 		fgValidChannel = FALSE;
@@ -3735,7 +3765,7 @@ rlmDomainBuildCmdByDefaultTable(struct CMD_SET_COUNTRY_CHANNEL_POWER_LIMIT
 
 		for (k = g_rRlmSubBand[i].ucStartCh;
 		     k <= g_rRlmSubBand[i].ucEndCh;
-		     k += g_rRlmSubBand[i].ucInterval) {
+		     k += rlmDomainGetChannelInterval(i, k)) {
 
 			/*
 			* Get subband power limit from default table
@@ -3750,6 +3780,7 @@ rlmDomainBuildCmdByDefaultTable(struct CMD_SET_COUNTRY_CHANNEL_POWER_LIMIT
 				> MAX_TX_POWER) {
 				DBGLOG(RLM, WARN,
 				"SubBand[%d] Pwr(%d) > Max (%d)",
+				u1PwrIdx,
 				prPwrLimitSubBand->aucPwrLimitSubBand[u1PwrIdx],
 				MAX_TX_POWER);
 				cLmtBand = MAX_TX_POWER;
@@ -7945,7 +7976,8 @@ void _txPwrCtrlDeleteElement(struct ADAPTER *prAdapter,
 		fgFind = FALSE;
 		prCurElement = LINK_ENTRY(prCur, struct TX_PWR_CTRL_ELEMENT,
 					  node);
-		if (kalStrCmp(prCurElement->name, name) == 0) {
+		if (prCurElement != NULL
+			&& kalStrCmp(prCurElement->name, name) == 0) {
 			if (index == 0)
 				fgFind = TRUE;
 			else if (prCurElement->index == index)
@@ -9749,7 +9781,7 @@ uint8_t rlmDomainGetChannelBw(enum ENUM_BAND eBand, uint8_t channelNum)
 {
 	uint32_t ch_idx = 0, start_idx = 0, end_idx = 0;
 #if (CFG_SUPPORT_WIFI_6G == 1)
-	uint8_t channelBw = MAX_BW_320MHZ;
+	uint8_t channelBw = MAX_BW_320_2MHZ;
 #else
 	uint8_t channelBw = MAX_BW_80_80_MHZ;
 #endif
@@ -9757,7 +9789,7 @@ uint8_t rlmDomainGetChannelBw(enum ENUM_BAND eBand, uint8_t channelNum)
 	enum ENUM_BAND eChBand;
 
 	//TODO: remove this
-	channelBw = MAX_BW_320MHZ;
+	channelBw = MAX_BW_320_2MHZ;
 
 	end_idx = rlmDomainGetActiveChannelCount(KAL_BAND_2GHZ)
 			+ rlmDomainGetActiveChannelCount(KAL_BAND_5GHZ)

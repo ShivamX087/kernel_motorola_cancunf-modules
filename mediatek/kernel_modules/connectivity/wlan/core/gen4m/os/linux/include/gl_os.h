@@ -117,6 +117,7 @@
 
 #endif
 
+#define	CONTROL_BUFFER_SIZE		(1025)
 /* for CFG80211 IE buffering mechanism */
 #define	CFG_CFG80211_IE_BUF_LEN		(640)
 #define	GLUE_INFO_WSCIE_LENGTH		(500)
@@ -128,6 +129,9 @@
 
 #define FW_LOG_CMD_ON_OFF		0
 #define FW_LOG_CMD_SET_LEVEL		1
+
+#define CALLER_LENGTH		60
+#define CALLER_MAX_NUM		10
 
 /*******************************************************************************
  *                    E X T E R N A L   R E F E R E N C E S
@@ -282,6 +286,9 @@
 #endif
 #include <linux/time.h>
 #include <linux/fb.h>
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+#include "mtk_disp_notify.h"
+#endif
 
 #if CFG_SUPPORT_NAN
 #include "nan_base.h"
@@ -292,6 +299,7 @@
 #include "agent.h"
 #endif
 
+extern u_int8_t fgIsMcuOff;
 extern u_int8_t fgIsBusAccessFailed;
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
 extern u_int8_t fgTriggerDebugSop;
@@ -304,9 +312,6 @@ extern const struct ieee80211_iface_combination
 extern const int32_t mtk_iface_combinations_p2p_num;
 extern uint8_t g_aucNvram[];
 extern uint8_t g_aucNvram_OnlyPreCal[];
-#if ARP_MONITER_ENABLE
-extern u_int8_t qmArpMonitorIsCritical(void);
-#endif
 
 /*******************************************************************************
  *                              C O N S T A N T S
@@ -387,6 +392,9 @@ extern u_int8_t qmArpMonitorIsCritical(void);
 
 #define GLUE_FLAG_DRV_OWN_INT_BIT		(26)
 #define GLUE_FLAG_DRV_OWN_INT			BIT(26)
+
+#define GLUE_FLAG_DISABLE_PERF_BIT              (27)
+#define GLUE_FLAG_DISABLE_PERF                  BIT(27)
 
 #define GLUE_BOW_KFIFO_DEPTH        (1024)
 /* #define GLUE_BOW_DEVICE_NAME        "MT6620 802.11 AMP" */
@@ -489,6 +497,7 @@ enum ENUM_P2P_REG_STATE {
 };
 #endif
 
+/* note: maximum of pkt flag is 16 */
 enum ENUM_PKT_FLAG {
 	ENUM_PKT_802_11,	/* 802.11 or non-802.11 */
 	ENUM_PKT_802_3,		/* 802.3 or ethernetII */
@@ -503,7 +512,8 @@ enum ENUM_PKT_FLAG {
 #if CFG_SUPPORT_TPENHANCE_MODE
 	ENUM_PKT_TCP_ACK,	/* TCP ACK */
 #endif /* CFG_SUPPORT_TPENHANCE_MODE */
-	ENUM_PKT_ICMPV6,		/* ICMPV6 */
+	ENUM_PKT_ICMPV6,	/* ICMPV6 */
+	ENUM_PKT_IPV6_HOP_BY_HOP,
 	ENUM_PKT_FLAG_NUM
 };
 
@@ -526,13 +536,13 @@ enum ENUM_NVRAM_STATE {
 /* WMM QOS user priority from 802.1D/802.11e */
 enum ENUM_WMM_UP {
 	WMM_UP_BE_INDEX = 0,
-	WMM_UP_BK_INDEX,
-	WMM_UP_RESV_INDEX,
-	WMM_UP_EE_INDEX,
-	WMM_UP_CL_INDEX,
-	WMM_UP_VI_INDEX,
-	WMM_UP_VO_INDEX,
-	WMM_UP_NC_INDEX,
+	WMM_UP_BK_INDEX = 1,
+	WMM_UP_RESV_INDEX = 2,
+	WMM_UP_EE_INDEX = 3,
+	WMM_UP_CL_INDEX = 4,
+	WMM_UP_VI_INDEX = 5,
+	WMM_UP_VO_INDEX = 6,
+	WMM_UP_NC_INDEX = 7,
 	WMM_UP_INDEX_NUM
 };
 
@@ -967,6 +977,8 @@ struct GLUE_INFO {
 	uint32_t u4CurrTick;
 	uint64_t u8CurrTime;
 
+	struct timespec64 u4DrvOwnIntTick;
+
 	/* FW Roaming */
 	/* store the FW roaming enable state which FWK determines */
 	/* if it's = 0, ignore the black/whitelists settings from FWK */
@@ -1002,6 +1014,12 @@ struct GLUE_INFO {
 #if CFG_SUPPORT_CSI
 	wait_queue_head_t waitq_csi;
 #endif
+
+	bool fgIsInSuspend;
+	bool fgIsSuspended;
+	char drv_own_caller[CALLER_LENGTH];
+	char fw_own_caller[CALLER_LENGTH];
+
 };
 
 typedef irqreturn_t(*PFN_WLANISR) (int irq, void *dev_id,
@@ -1422,69 +1440,6 @@ static __KAL_INLINE__ void glPacketDataTypeCheck(void)
 {
 	DATA_STRUCT_INSPECTING_ASSERT(sizeof(struct
 		PACKET_PRIVATE_DATA) <= sizeof(((struct sk_buff *) 0)->cb));
-}
-
-static bool is_critical_packet(struct net_device *dev,
-	struct sk_buff *skb, u16 orig_queue_index)
-{
-#if CFG_CHANGE_CRITICAL_PACKET_PRIORITY
-	uint8_t *pucPkt;
-	uint16_t u2EtherType;
-	bool is_critical = false;
-
-	if (!skb)
-		return false;
-
-	pucPkt = skb->data;
-	u2EtherType = (pucPkt[ETH_TYPE_LEN_OFFSET] << 8)
-			| (pucPkt[ETH_TYPE_LEN_OFFSET + 1]);
-
-	switch (u2EtherType) {
-	case ETH_P_ARP:
-		if (__netif_subqueue_stopped(dev, orig_queue_index))
-			is_critical = true;
-#if ARP_MONITER_ENABLE
-		if (qmArpMonitorIsCritical())
-			is_critical = true;
-#endif
-		break;
-	case ETH_P_1X:
-	case ETH_P_PRE_1X:
-#if CFG_SUPPORT_WAPI
-	case ETH_WPI_1X:
-#endif
-		is_critical = true;
-		break;
-	default:
-		is_critical = false;
-		break;
-	}
-	return is_critical;
-#else
-	return false;
-#endif
-}
-
-static inline u16 mtk_wlan_ndev_select_queue(
-	struct net_device *dev,
-	struct sk_buff *skb)
-{
-	static u16 ieee8021d_to_queue[8] = { 1, 0, 0, 1, 2, 2, 3, 3 };
-	u16 queue_index = 0;
-
-	/* cfg80211_classify8021d returns 0~7 */
-#if KERNEL_VERSION(3, 14, 0) > CFG80211_VERSION_CODE
-	skb->priority = cfg80211_classify8021d(skb);
-#else
-	skb->priority = cfg80211_classify8021d(skb, NULL);
-#endif
-	queue_index = ieee8021d_to_queue[skb->priority];
-	if (is_critical_packet(dev, skb, queue_index)) {
-		skb->priority = WMM_UP_VO_INDEX;
-		queue_index = ieee8021d_to_queue[skb->priority];
-	}
-
-	return queue_index;
 }
 
 #if KERNEL_VERSION(2, 6, 34) > LINUX_VERSION_CODE

@@ -988,12 +988,15 @@ void cnmChMngrHandleChEvent(struct ADAPTER *prAdapter,
 	}
 
 	log_dbg(CNM, INFO,
-	       "ChGrant net=%d band=%d token=%d ch=%d sco=%d u4GrantInterval=%d\n",
+	       "ChGrant net=%d band=%d token=%d ch=%d bw=%d sco=%d s1=%d s2=%d, u4GrantInterval=%d\n",
 	       prEventBody->ucBssIndex,
 	       prEventBody->ucDBDCBand,
 	       prEventBody->ucTokenID,
 	       prEventBody->ucPrimaryChannel,
+	       prEventBody->ucRfChannelWidth,
 	       prEventBody->ucRfSco,
+	       prEventBody->ucRfCenterFreqSeg1,
+	       prEventBody->ucRfCenterFreqSeg2,
 	       prEventBody->u4GrantInterval);
 
 	ASSERT(prEventBody->ucBssIndex <=
@@ -1154,12 +1157,20 @@ void cnmRadarDetectEvent(struct ADAPTER *prAdapter,
 void cnmCsaDoneEvent(struct ADAPTER *prAdapter,
 			struct WIFI_EVENT *prEvent)
 {
-	DBGLOG(CNM, INFO, "cnmCsaDoneEvent.\n");
+	struct BSS_INFO *prP2pBssInfo = (struct BSS_INFO *) NULL;
+	uint8_t ucBssIndex;
 
+	DBGLOG(CNM, INFO, "cnmCsaDoneEvent.\n");
 	if (prAdapter->rWifiVar.fgCsaInProgress == FALSE) {
 		DBGLOG(CNM, WARN, "Receive duplicate cnmCsaDoneEvent.\n");
 		return;
 	}
+	ucBssIndex = p2pFuncGetCsaBssIndex();
+	if (!IS_BSS_INDEX_VALID(ucBssIndex)) {
+		log_dbg(CNM, ERROR, "Csa bss is invalid!\n");
+		return;
+	}
+	prP2pBssInfo = prAdapter->aprBssInfo[ucBssIndex];
 
 	/* Clean up CSA variable */
 	prAdapter->rWifiVar.fgCsaInProgress = FALSE;
@@ -1171,7 +1182,9 @@ void cnmCsaDoneEvent(struct ADAPTER *prAdapter,
 	prAdapter->rWifiVar.ucNewChannelWidth = 0;
 	prAdapter->rWifiVar.ucNewChannelS1 = 0;
 	prAdapter->rWifiVar.ucNewChannelS2 = 0;
-
+	if (!prP2pBssInfo ||
+		prP2pBssInfo->eCurrentOPMode == OP_MODE_INFRASTRUCTURE)
+		return;
 	p2pFunChnlSwitchNotifyDone(prAdapter);
 }
 #endif
@@ -4206,21 +4219,15 @@ struct BSS_INFO *cnmGetSapBssInfo(struct ADAPTER *prAdapter)
 	if (!prAdapter)
 		return NULL;
 
-	for (i = 0; i < prAdapter->ucHwBssIdNum; i++) {
-		prBssInfo = prAdapter->aprBssInfo[i];
+	for (i = 0; i < KAL_P2P_NUM; i++) {
+		prBssInfo = prAdapter->aprSapBssInfo[i];
 
-		if (prBssInfo &&
-			IS_BSS_P2P(prBssInfo) &&
-			p2pFuncIsAPMode(
-			prAdapter->rWifiVar.prP2PConnSettings
-			[prBssInfo->u4PrivateData]) &&
-			IS_NET_PWR_STATE_ACTIVE(
-			prAdapter,
-			prBssInfo->ucBssIndex))
+		if (prBssInfo)
 			return prBssInfo;
 	}
 
 	return NULL;
+
 }
 
 struct BSS_INFO *
@@ -4691,6 +4698,10 @@ uint8_t cnmOpModeGetMaxBw(struct ADAPTER *prAdapter,
 	uint8_t ucS1 = 0;
 
 	if (prBssInfo->eCurrentOPMode == OP_MODE_ACCESS_POINT) {
+#if CFG_SUPPORT_P2P_ECSA
+		uint8_t ucRoleIndex = prBssInfo->u4PrivateData;
+#endif
+
 #if CFG_SUPPORT_DBDC
 		ucOpMaxBw = cnmGetDbdcBwCapability(prAdapter,
 				prBssInfo->ucBssIndex);
@@ -4698,19 +4709,39 @@ uint8_t cnmOpModeGetMaxBw(struct ADAPTER *prAdapter,
 		ucOpMaxBw = cnmGetBssMaxBw(prAdapter,
 				prBssInfo->ucBssIndex);
 #endif
+
+#if CFG_SUPPORT_P2P_ECSA
+		/* ECSA overwrite */
+		if (prAdapter->rWifiVar
+			.prP2pSpecificBssInfo[ucRoleIndex]
+			->fgEcsa) {
+			uint8_t bw = prAdapter->rWifiVar
+				.prP2pSpecificBssInfo[ucRoleIndex]
+				->ucEcsaBw;
+
+			if (bw < ucOpMaxBw) {
+				ucOpMaxBw = bw;
+				DBGLOG(P2P, INFO,
+					"ECSA overwrite bw %d\n", bw);
+			}
+		}
+#endif
+
 		if (ucOpMaxBw >= MAX_BW_80MHZ) {
 			/* Verify if there is valid S1 */
 			ucS1 = nicGetS1(prBssInfo->eBand,
 				prBssInfo->ucPrimaryChannel,
-				rlmMaxBwToVhtBw(ucOpMaxBw));
+				rlmGetVhtOpBwByBssOpBw(ucOpMaxBw));
 
 			/* Try if there is valid S1 for BW160 if we failed to
 			 * get S1 for BW320.
 			 */
-			if (ucS1 == 0 && ucOpMaxBw == MAX_BW_320MHZ) {
+			if (ucS1 == 0 &&
+			   (ucOpMaxBw == MAX_BW_320_1MHZ ||
+			    ucOpMaxBw == MAX_BW_320_2MHZ)) {
 				ucS1 = nicGetS1(prBssInfo->eBand,
 					prBssInfo->ucPrimaryChannel,
-					rlmMaxBwToVhtBw(MAX_BW_160MHZ));
+					rlmGetVhtOpBwByBssOpBw(MAX_BW_160MHZ));
 
 				if (ucS1) /* Fallback to BW80 */
 					ucOpMaxBw = MAX_BW_160MHZ;
@@ -4722,7 +4753,7 @@ uint8_t cnmOpModeGetMaxBw(struct ADAPTER *prAdapter,
 			if (ucS1 == 0 && ucOpMaxBw == MAX_BW_160MHZ) {
 				ucS1 = nicGetS1(prBssInfo->eBand,
 					prBssInfo->ucPrimaryChannel,
-					rlmMaxBwToVhtBw(MAX_BW_80MHZ));
+					rlmGetVhtOpBwByBssOpBw(MAX_BW_80MHZ));
 
 				if (ucS1) /* Fallback to BW80 */
 					ucOpMaxBw = MAX_BW_80MHZ;

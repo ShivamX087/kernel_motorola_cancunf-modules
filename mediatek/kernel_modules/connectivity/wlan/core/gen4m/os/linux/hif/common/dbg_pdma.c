@@ -131,19 +131,15 @@ static bool halIsTxTimeout(struct ADAPTER *prAdapter, uint32_t *u4Token);
 void halPrintHifDbgInfo(struct ADAPTER *prAdapter)
 {
 	struct mt66xx_chip_info *chip_info = prAdapter->chip_info;
+	struct CHIP_DBG_OPS *debug_ops = chip_info->prDebugOps;
 
 	if (!prAdapter->fgIsFwOwn) {
 		halCheckHifState(prAdapter);
 		halDumpHifDebugLog(prAdapter);
-	} else {
-		DBGLOG(HAL, ERROR, "Skip due to FW own.\n");
-	}
-
-	if (chip_info) {
-		struct CHIP_DBG_OPS *debug_ops = chip_info->prDebugOps;
-
 		if (debug_ops && debug_ops->dumpwfsyscpupcr)
 			debug_ops->dumpwfsyscpupcr(prAdapter);
+	} else {
+		DBGLOG(HAL, ERROR, "Skip due to FW own.\n");
 	}
 }
 
@@ -219,10 +215,6 @@ static void halDumpTxHangLog(struct ADAPTER *prAdapter, uint32_t u4TokenId)
 
 		if (prDbgOps && prDbgOps->dumpMacInfo)
 			prDbgOps->dumpMacInfo(prAdapter);
-
-		if (u4DebugLevel & DBG_CLASS_TRACE)
-			if (prDbgOps && prDbgOps->dumpPhyInfo)
-				prDbgOps->dumpPhyInfo(prAdapter);
 
 		if (prDbgOps && prDbgOps->setFwDebug) {
 			/* clr drv print log sync flag */
@@ -431,11 +423,6 @@ static void halDumpHifDebugLog(struct ADAPTER *prAdapter)
 			prDbgOps->dumpMacInfo(prAdapter);
 	}
 
-	if (prAdapter->u4HifDbgFlag & (DEG_HIF_ALL | DEG_HIF_PHY)) {
-		if (prDbgOps && prDbgOps->dumpPhyInfo)
-			prDbgOps->dumpPhyInfo(prAdapter);
-	}
-
 	prHifInfo->fgForceReadWriteReg = false;
 	prAdapter->u4HifDbgFlag = 0;
 }
@@ -638,10 +625,14 @@ static bool halIsTxTimeout(struct ADAPTER *prAdapter, uint32_t *u4Token)
 	struct MSDU_TOKEN_INFO *prTokenInfo;
 	struct MSDU_TOKEN_ENTRY *prToken;
 	struct MSDU_TOKEN_HISTORY_INFO *prHistory;
+	struct STA_RECORD *prStaRec;
+	struct BSS_INFO *prBssInfo;
 	struct timespec64 rNowTs, rTime, rLongest, rTimeout;
 	uint32_t u4Idx = 0, u4TokenId = 0;
 	bool fgIsTimeout = false;
 	struct WIFI_VAR *prWifiVar;
+	uint8_t ucStaIdx = 0;
+	bool fgIsSAPorGO = false;
 
 	ASSERT(prAdapter);
 	ASSERT(prAdapter->prGlueInfo);
@@ -681,14 +672,33 @@ static bool halIsTxTimeout(struct ADAPTER *prAdapter, uint32_t *u4Token)
 	if (fgIsTimeout) {
 		prToken = &prTokenInfo->arToken[u4TokenId];
 
+		secPrivacyDumpWTBL(prAdapter);
+
+		if (wlanGetStaIdxByWlanIdx(prAdapter, prToken->ucWlanIndex,
+			&ucStaIdx) == WLAN_STATUS_SUCCESS) {
+			cnmDumpStaRec(prAdapter, ucStaIdx);
+
+			prStaRec = cnmGetStaRecByIndex(prAdapter, ucStaIdx);
+
+			if (prStaRec != NULL) {
+				bssDumpBssInfo(prAdapter, prStaRec->ucBssIndex);
+
+				prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter,
+					prStaRec->ucBssIndex);
+				if (prBssInfo && (prBssInfo->eCurrentOPMode
+					== OP_MODE_ACCESS_POINT))
+					fgIsSAPorGO = true;
+			}
+		}
+
 		DBGLOG(HAL, INFO,
-				"TokenId[%u] Wlan_Idx[%u] timeout[sec:%ld]\n",
-				u4TokenId,
-				prToken->ucWlanIndex,
-				rLongest.tv_sec);
+				"TokenId[%u] Wlan_Idx[%u] timeout[sec:%ld] SAP_GO[%u]\n",
+				u4TokenId, prToken->ucWlanIndex,
+				rLongest.tv_sec, fgIsSAPorGO);
 
 		if (prToken->prPacket)
 			DBGLOG_MEM32(HAL, INFO, prToken->prPacket, 64);
+
 		prHistory->au4List[prHistory->u4CurIdx].u4LongestId = u4TokenId;
 		prHistory->au4List[prHistory->u4CurIdx].u4UsedCnt =
 			prTokenInfo->u4UsedCnt;
@@ -697,6 +707,13 @@ static bool halIsTxTimeout(struct ADAPTER *prAdapter, uint32_t *u4Token)
 		halNotifyTxHangEvent(prAdapter, prHistory);
 	} else {
 		kalMemZero(prHistory, sizeof(struct MSDU_TOKEN_HISTORY_INFO));
+	}
+
+	/* Trigger SER */
+	if (rLongest.tv_sec >= prWifiVar->ucMsduReportTimeoutSerTime) {
+		prAdapter->u4HifChkFlag |= HIF_DRV_SER;
+		DBGLOG(HAL, INFO, "Timeout > %ds, trigger SER\n",
+		       prWifiVar->ucMsduReportTimeoutSerTime);
 	}
 
 	*u4Token = u4TokenId;
@@ -778,7 +795,7 @@ void halShowPdmaInfo(struct ADAPTER *prAdapter)
 #define BUF_SIZE 1024
 
 	uint32_t i = 0, u4Value = 0, pos = 0;
-	uint32_t offset, offset_ext, SwIdx;
+	uint32_t offset, offset_ext, SwIdx, SwIdx1, SwIdx2;
 	char *buf;
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct BUS_INFO *prBus_info = prAdapter->chip_info->bus_info;
@@ -952,14 +969,22 @@ void halShowPdmaInfo(struct ADAPTER *prAdapter)
 		DBGLOG(HAL, INFO, "Dump PDMA Rx Ring[%u]\n",
 				wfmda_rx_group[i].ring_idx);
 		prRxRing = &prHifInfo->RxRing[i];
-		SwIdx = wfmda_rx_group[i].didx;
+		SwIdx1 = wfmda_rx_group[i].didx;
 		kalDumpRxRing(prAdapter->prGlueInfo, prRxRing,
-			      SwIdx, true);
-		SwIdx = wfmda_rx_group[i].didx == 0 ?
+			      SwIdx1, true);
+		SwIdx2 = wfmda_rx_group[i].didx == 0 ?
 				wfmda_rx_group[i].cnt - 1 :
 				wfmda_rx_group[i].didx - 1;
 		kalDumpRxRing(prAdapter->prGlueInfo, prRxRing,
-			      SwIdx, true);
+			      SwIdx2, true);
+		SwIdx = wfmda_rx_group[i].cidx ==
+				wfmda_rx_group[i].cnt - 1 ?
+				0 :
+				wfmda_rx_group[i].cidx + 1;
+		if (SwIdx != SwIdx1 && SwIdx != SwIdx2) {
+			kalDumpRxRing(prAdapter->prGlueInfo, prRxRing,
+				      SwIdx, true);
+		}
 	}
 
 	/* PDMA Busy Status */
@@ -1122,18 +1147,5 @@ bool halShowHostCsrInfo(struct ADAPTER *prAdapter)
 	fgEnClock = ((u4Value & BIT(17)) != 0) && ((u4Value & BIT(16)) != 0);
 
 	return fgIsDriverOwn && fgEnClock;
-}
-
-void haldumpPhyInfo(struct ADAPTER *prAdapter)
-{
-	uint32_t i = 0, value = 0;
-
-	for (i = 0; i < 20; i++) {
-		HAL_MCR_RD(prAdapter, 0x82072644, &value);
-		DBGLOG(HAL, INFO, "0x82072644: 0x%08x\n", value);
-		HAL_MCR_RD(prAdapter, 0x82072654, &value);
-		DBGLOG(HAL, INFO, "0x82072654: 0x%08x\n", value);
-		kalMdelay(1);
-	}
 }
 

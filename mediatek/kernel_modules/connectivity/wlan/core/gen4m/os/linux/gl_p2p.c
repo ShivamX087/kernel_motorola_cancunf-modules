@@ -792,6 +792,7 @@ u_int8_t p2PFreeInfo(struct GLUE_INFO *prGlueInfo, uint8_t ucIdx)
 {
 	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
 	struct WIFI_VAR *prWifiVar;
+	struct P2P_PENDING_MGMT_INFO *prPendingMgmtInfo = NULL;
 
 	ASSERT(prGlueInfo);
 	ASSERT(prAdapter);
@@ -829,6 +830,16 @@ u_int8_t p2PFreeInfo(struct GLUE_INFO *prGlueInfo, uint8_t ucIdx)
 			(void **)&prWifiVar->prP2pQueryStaStatistics[ucIdx],
 			sizeof(struct PARAM_GET_STA_STATISTICS));
 #endif
+		while (!LINK_IS_EMPTY(&prGlueInfo->prP2PInfo[ucIdx]->rWaitTxDoneLink)) {
+			LINK_REMOVE_HEAD(
+				&prGlueInfo->prP2PInfo[ucIdx]->rWaitTxDoneLink,
+				prPendingMgmtInfo,
+				struct P2P_PENDING_MGMT_INFO *);
+			DBGLOG(P2P, INFO, "Free pending mgmt link[%u] cookie: 0x%llx\n",
+				ucIdx, prPendingMgmtInfo->u8PendingMgmtCookie);
+			cnmMemFree(prAdapter, prPendingMgmtInfo);
+		}
+
 		p2pFreeMemSafe(prGlueInfo,
 			(void **)&prGlueInfo->prP2PInfo[ucIdx],
 			sizeof(struct GL_P2P_INFO));
@@ -936,14 +947,19 @@ u_int8_t p2pNetRegister(struct GLUE_INFO *prGlueInfo,
 		}
 		GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
 
-		if (fgIsRtnlLockAcquired) {
+		if (prDevHandler->reg_state == NETREG_UNINITIALIZED) {
+			if (fgIsRtnlLockAcquired) {
 #if KERNEL_VERSION(5, 12, 0) <= CFG80211_VERSION_CODE
-			i4RetReg = cfg80211_register_netdevice(prDevHandler);
+				i4RetReg = cfg80211_register_netdevice(prDevHandler);
 #else
-			i4RetReg = register_netdevice(prDevHandler);
+				i4RetReg = register_netdevice(prDevHandler);
 #endif
-		} else
-			i4RetReg = register_netdev(prDevHandler);
+			} else
+				i4RetReg = register_netdev(prDevHandler);
+		} else {
+			DBGLOG(INIT, ERROR, "netdevice reg state: %u\n",
+				prDevHandler->reg_state);
+		}
 
 		/* register for net device */
 		if (i4RetReg < 0) {
@@ -1098,6 +1114,9 @@ u_int8_t p2pNetUnregister(struct GLUE_INFO *prGlueInfo,
 #endif
 			} else
 				unregister_netdev(prP2PInfo->prDevHandler);
+		} else {
+			DBGLOG(INIT, ERROR, "netdevice reg state: %u\n",
+				prP2PInfo->prDevHandler->reg_state);
 		}
 	}
 
@@ -1243,6 +1262,7 @@ int glSetupP2P(struct GLUE_INFO *prGlueInfo, struct wireless_dev *prP2pWdev,
 
 	/* XXX: All the P2P/AP devices do p2pDevFsmInit in the original code */
 	p2pDevFsmInit(prAdapter);
+	LINK_INITIALIZE(&prP2PInfo->rWaitTxDoneLink);
 
 	if ((fgSkipRole == SKIP_ROLE_ALL) ||
 		((fgSkipRole == SKIP_ROLE_EXCEPT_MAIN) && u4Idx))
@@ -1260,7 +1280,6 @@ int glSetupP2P(struct GLUE_INFO *prGlueInfo, struct wireless_dev *prP2pWdev,
 
 	prNetDevPriv->ucBssIdx = p2pRoleFsmInit(prAdapter, (uint8_t) u4Idx);
 	init_completion(&prP2PInfo->rStopApComp);
-	init_completion(&prP2PInfo->rWaitRocComp);
 
 	/* Currently wpasupplicant can't support create interface. */
 	/* so initial the corresponding data structure here. */

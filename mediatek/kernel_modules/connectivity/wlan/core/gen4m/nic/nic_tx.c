@@ -358,8 +358,6 @@ void nicTxInitialize(struct ADAPTER *prAdapter)
 	/* enable/disable TX resource control */
 	prTxCtrl->fgIsTxResourceCtrl = NIC_TX_RESOURCE_CTRL;
 
-	prAdapter->cArpNoResponseIdx = -1;
-
 	qmInit(prAdapter, halIsTxResourceControlEn(prAdapter));
 
 	TX_RESET_ALL_CNTS(prTxCtrl);
@@ -1756,7 +1754,7 @@ void nicTxMsduQueueByPrioTxHifPortQ(struct ADAPTER *prAdapter)
 #else
 		i = 0;
 #endif
-		if (i >= MAX_BSSID_NUM)
+		if (i >= MAX_BSSID_NUM || i < 0)
 			continue;
 
 		for (k = 0; k < MAX_BSSID_NUM; k++) {
@@ -2157,6 +2155,11 @@ u_int8_t nicTxIsTXDTemplateAllowed(struct ADAPTER
 		if (prAdapter->rWifiVar.ucDataTxRateMode)
 			return FALSE;
 
+#if defined(_HIF_USB)
+		if (!prStaRec->aprTxDescTemplate[prMsduInfo->ucUserPriority])
+			return FALSE;
+#endif
+
 		return TRUE;
 	}
 	return FALSE;
@@ -2220,12 +2223,7 @@ nicTxFillDesc(struct ADAPTER *prAdapter,
 	u4TxDescLength = NIC_TX_DESC_LONG_FORMAT_LENGTH;
 
 	/* Get TXD from pre-allocated template */
-	if (nicTxIsTXDTemplateAllowed(prAdapter, prMsduInfo,
-				      prStaRec)
-#if defined(_HIF_USB)
-		&& prStaRec->aprTxDescTemplate[prMsduInfo->ucUserPriority]
-#endif
-		) {
+	if (nicTxIsTXDTemplateAllowed(prAdapter, prMsduInfo, prStaRec)) {
 		prTxDescTemplate =
 			prStaRec->aprTxDescTemplate[prMsduInfo->ucUserPriority];
 	}
@@ -2368,6 +2366,19 @@ nicTxFillDesc(struct ADAPTER *prAdapter,
 		*pu4TxDescLength = u4TxDescLength;
 }
 
+#if (CFG_SUPPORT_802_11BE_MLO == 1)
+static u_int8_t isEapolBeforeKeyReady(struct ADAPTER *prAdapter,
+				struct MSDU_INFO *prMsduInfo)
+{
+	struct STA_RECORD *prStaRec;
+
+	prStaRec = cnmGetStaRecByIndex(prAdapter, prMsduInfo->ucStaRecIndex);
+
+	return prMsduInfo->ucPktType == ENUM_PKT_1X &&
+		prStaRec && !prStaRec->fgIsTxKeyReady;
+}
+#endif
+
 void
 nicTxFillDataDesc(struct ADAPTER *prAdapter,
 		  struct MSDU_INFO *prMsduInfo)
@@ -2375,6 +2386,8 @@ nicTxFillDataDesc(struct ADAPTER *prAdapter,
 	uint8_t *pucOutputBuf;
 	struct mt66xx_chip_info *prChipInfo = prAdapter->chip_info;
 	int16_t i2HeadLength;
+
+	qmDetermineTxPacketRate(prAdapter, prMsduInfo);
 
 	i2HeadLength = NIC_TX_DESC_AND_PADDING_LENGTH
 			+ prChipInfo->txd_append_size;
@@ -2386,14 +2399,20 @@ nicTxFillDataDesc(struct ADAPTER *prAdapter,
 	if (pucOutputBuf == NULL)
 		return;
 
+#if (CFG_SUPPORT_802_11BE_MLO == 1)
+	if (isEapolBeforeKeyReady(prAdapter, prMsduInfo)) {
+		nicTxConfigPktControlFlag(prMsduInfo,
+				MSDU_CONTROL_FLAG_FORCE_LINK, TRUE);
+	}
+#endif /* CFG_SUPPORT_802_11BE_MLO */
+
 	nicTxFillDesc(prAdapter, prMsduInfo, pucOutputBuf, NULL);
 	/* dump TXD to debug TX issue */
 	if (prAdapter->rWifiVar.ucDataTxDone == 1) {
 		struct CHIP_DBG_OPS *prDbgOps =
 			prAdapter->chip_info->prDebugOps;
 		if (prDbgOps && prDbgOps->dumpTxdInfo)
-			prDbgOps->dumpTxdInfo(prAdapter,
-			(uint8_t *)pucOutputBuf);
+			prDbgOps->dumpTxdInfo(prAdapter, pucOutputBuf);
 	}
 }
 
@@ -4414,20 +4433,6 @@ uint32_t nicTxEnqueueMsdu(struct ADAPTER *prAdapter,
 		prRetMsduInfo = qmEnqueueTxPackets(prAdapter,
 				QUEUE_GET_HEAD(prDataPort0));
 		KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_QM_TX_QUEUE);
-#if ARP_MONITER_ENABLE
-		if (prAdapter->cArpNoResponseIdx >= 0) {
-#if CFG_SUPPORT_DATA_STALL
-			KAL_REPORT_ERROR_EVENT(prAdapter,
-				EVENT_ARP_NO_RESPONSE,
-				(uint16_t)sizeof(uint32_t),
-				prAdapter->cArpNoResponseIdx,
-				FALSE);
-#endif /* CFG_SUPPORT_DATA_STALL */
-			aisBssBeaconTimeout(prAdapter,
-				prAdapter->cArpNoResponseIdx);
-			prAdapter->cArpNoResponseIdx = -1;
-		}
-#endif /* ARP_MONITER_ENABLE */
 		/* post-process for dropped packets */
 		if (prRetMsduInfo) {	/* unable to enqueue */
 			nicTxFreeMsduInfoPacket(prAdapter, prRetMsduInfo);
@@ -5010,6 +5015,7 @@ void nicTxSetPktFixedRateOption(
 
 	if (prTxDescOps->nic_txd_set_pkt_fixed_rate_option)
 		prTxDescOps->nic_txd_set_pkt_fixed_rate_option(
+			prAdapter,
 			prMsduInfo,
 			u2RateCode,
 			ucBandwidth,
@@ -5871,8 +5877,9 @@ static void nicTxDirectCheckStaAcmQ(struct ADAPTER *prAdapter,
 	struct QUE *prTmpQue;
 
 	if (ucTC >= TC_NUM || ucStaIdx >= CFG_STA_REC_NUM) {
-		DBGLOG(NIC, ERROR, "ucTc:%u ucStaIdx:%u\n",
-			ucTC, ucStaIdx);
+		if (ucStaIdx != STA_REC_INDEX_BMCAST)
+			DBGLOG(NIC, ERROR, "ucTc:%u ucStaIdx:%u\n",
+				ucTC, ucStaIdx);
 		return;
 	}
 
@@ -5886,7 +5893,7 @@ static void nicTxDirectCheckStaAcmQ(struct ADAPTER *prAdapter,
 
 	/* check if acm required */
 	if (likely(!prStaRec->afgAcmRequired[ucAc])) {
-		DBGLOG(NIC, TRACE, "afgAcmRequired:%u\n",
+		DBGLOG(NIC, LOUD, "afgAcmRequired:%u\n",
 			prStaRec->afgAcmRequired[ucAc]);
 		return;
 	}
@@ -6036,6 +6043,54 @@ uint32_t nicTxDirectToHif(struct ADAPTER *prAdapter,
 }
 #endif /* CFG_TX_DIRECT_VIA_HIF_THREAD */
 
+static void updateNanStaRecTxAllowed(struct ADAPTER *prAdapter,
+		struct STA_RECORD *prStaRec, struct BSS_INFO *prBssInfo)
+{
+#if CFG_SUPPORT_NAN
+#if CFG_SUPPORT_NAN_ADVANCE_DATA_CONTROL
+	OS_SYSTIME rCurrentTime = 0, ExpiredSendTime = 0;
+	unsigned char fgExpired = 0;
+
+	KAL_SPIN_LOCK_DECLARATION();
+
+	if (!prStaRec)
+		return;
+
+	if (prBssInfo->eNetworkType != NETWORK_TYPE_NAN)
+		return;
+
+	/* Need to protect StaRec NAN flag */
+	KAL_ACQUIRE_SPIN_LOCK(prAdapter,
+			SPIN_LOCK_NAN_NDL_FLOW_CTRL);
+
+	rCurrentTime = kalGetTimeTick();
+	ExpiredSendTime = prStaRec->rNanExpiredSendTime;
+	fgExpired = CHECK_FOR_EXPIRATION(rCurrentTime,
+			ExpiredSendTime);
+
+	/* avoid to flood the kernel log, only the 1st expiry event logged */
+	if (fgExpired &&
+			!prStaRec->fgNanSendTimeExpired) {
+		DBGLOG(NAN, INFO,
+			"[NAN Pkt Tx Expired] Sta:%u, Exp:%u, Now:%u\n",
+			prStaRec->ucIndex,
+			ExpiredSendTime,
+			rCurrentTime);
+
+		prStaRec->fgNanSendTimeExpired = TRUE;
+		/* NAN StaRec Stop Tx */
+		qmSetStaRecTxAllowed(prAdapter, prStaRec, FALSE);
+	} else if (!fgExpired &&
+			prStaRec->fgNanSendTimeExpired) {
+		prStaRec->fgNanSendTimeExpired = FALSE;
+	}
+
+	KAL_RELEASE_SPIN_LOCK(prAdapter,
+			SPIN_LOCK_NAN_NDL_FLOW_CTRL);
+#endif
+#endif
+}
+
 /*----------------------------------------------------------------------------*/
 /*
  * \brief This function is called by nicTxDirectStartXmit()
@@ -6114,7 +6169,7 @@ uint32_t nicTxDirectStartXmitMain(void *pvPacket,
 			return WLAN_STATUS_FAILURE;
 		}
 
-#if CFG_MSCS_SUPPORT
+#if CFG_FAST_PATH_SUPPORT
 		/* Check if need to send a MSCS request */
 		if (mscsIsNeedRequest(prAdapter, pvPacket)) {
 			/* Request a mscs frame if needed */
@@ -6186,7 +6241,7 @@ uint32_t nicTxDirectStartXmitMain(void *pvPacket,
 				prStaRec =
 					QM_GET_STA_REC_PTR_FROM_INDEX(prAdapter,
 						prMsduInfo->ucStaRecIndex);
-				if (prStaRec && IS_STA_IN_AIS(prStaRec) &&
+				if (prStaRec &&
 					prMsduInfo->eSrc == TX_PACKET_OS)
 					qmDetectArpNoResponse(prAdapter,
 						prMsduInfo);
@@ -6200,30 +6255,6 @@ uint32_t nicTxDirectStartXmitMain(void *pvPacket,
 
 			/* Check the Tx descriptor template is valid */
 			qmSetTxPacketDescTemplate(prAdapter, prMsduInfo);
-
-			/* Set Tx rate */
-			switch (prAdapter->rWifiVar.ucDataTxRateMode) {
-			case DATA_RATE_MODE_BSS_LOWEST:
-				nicTxSetPktLowestFixedRate(prAdapter,
-					prMsduInfo);
-				break;
-
-			case DATA_RATE_MODE_MANUAL:
-				prMsduInfo->u4FixedRateOption =
-					prAdapter->rWifiVar.u4DataTxRateCode;
-
-				prMsduInfo->ucRateMode =
-					MSDU_RATE_MODE_MANUAL_DESC;
-				break;
-
-			case DATA_RATE_MODE_AUTO:
-			default:
-				if (prMsduInfo->ucRateMode
-					== MSDU_RATE_MODE_LOWEST_RATE)
-					nicTxSetPktLowestFixedRate(
-						prAdapter, prMsduInfo);
-				break;
-			}
 
 			/* BMC pkt need limited rate according to coex report*/
 			if (prMsduInfo->ucStaRecIndex == STA_REC_INDEX_BMCAST)
@@ -6250,6 +6281,9 @@ uint32_t nicTxDirectStartXmitMain(void *pvPacket,
 				prMsduInfo->ucTC,
 				prProcessingQue);
 #endif /* CFG_SUPPORT_SOFT_ACM */
+
+			updateNanStaRecTxAllowed(prAdapter, prStaRec,
+						prBssInfo);
 
 			/* Power-save & TxAllowed STA handling */
 			nicTxDirectCheckStaPsPendQ(prAdapter, prMsduInfo,

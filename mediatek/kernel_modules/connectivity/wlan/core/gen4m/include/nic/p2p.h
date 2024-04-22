@@ -130,10 +130,12 @@
 #endif
 
 #if (CFG_TX_MGMT_BY_DATA_Q == 1)
-#define DEFAULT_P2P_PROBERESP_RETRY_LIMIT (6)
+#define DEFAULT_P2P_PROBERESP_RETRY_LIMIT (2)
 #else
 #define DEFAULT_P2P_PROBERESP_RETRY_LIMIT (2)
 #endif
+
+#define DEFAULT_P2P_PROBERESP_LIFE_TIME 500
 
 /******************************************************************************
  *                                 M A C R O S
@@ -420,6 +422,14 @@ struct P2P_SPECIFIC_BSS_INFO {
 	struct WIFI_EVENT *prRddPostOpchng;
 	u_int8_t ucRddBw;
 	u_int8_t ucRddCh;
+#if CFG_SUPPORT_P2P_ECSA
+	u_int8_t fgEcsa;
+	u_int8_t ucEcsaBw;
+#endif
+
+	/* OWE */
+	uint8_t *pucDHIEBuf;
+	uint8_t ucDHIELen;
 };
 
 struct P2P_QUEUED_ACTION_FRAME {
@@ -439,6 +449,20 @@ struct P2P_LINK_INFO {
 	struct BSS_INFO *prP2pBss;
 	struct BSS_DESC *prP2pTargetBssDesc;
 	struct STA_RECORD *prP2pTargetStaRec;
+};
+
+struct P2P_LISTEN_OFFLOAD_INFO {
+	uint8_t ucBssIndex;
+	uint32_t u4DevId;
+	uint32_t u4flags;
+	uint32_t u4Freq;
+	uint32_t u4Period;
+	uint32_t u4Interval;
+	uint32_t u4Count;
+	uint8_t aucDevice[MAX_UEVENT_LEN];
+	uint32_t u2DevLen;
+	uint8_t aucIE[MAX_IE_LENGTH];
+	uint16_t u2IELen;
 };
 
 /******************************************************************************

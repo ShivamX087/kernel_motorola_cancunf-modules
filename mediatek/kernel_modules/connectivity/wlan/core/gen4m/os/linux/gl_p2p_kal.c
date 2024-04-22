@@ -71,6 +71,11 @@
 #include "precomp.h"
 #include "gl_wext.h"
 
+#if CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY
+#include <net/cnss_utils.h>
+#include <linux/dev_ril_bridge.h>
+#endif
+
 /******************************************************************************
  *                              C O N S T A N T S
  ******************************************************************************
@@ -660,20 +665,6 @@ uint8_t kalP2PIsTxCarrierOn(struct GLUE_INFO *prGlueInfo,
 		return FALSE;
 
 	return netif_carrier_ok(prDevHandler);
-}
-
-void kalP2PEnableNetDev(struct GLUE_INFO *prGlueInfo,
-		struct BSS_INFO *prBssInfo)
-{
-	uint8_t ucRoleIdx  = (uint8_t)prBssInfo->u4PrivateData;
-
-	kalP2PTxCarrierOn(prGlueInfo,
-			prBssInfo);
-
-	if (p2pFuncGetDfsState() == DFS_STATE_DETECTED) {
-		prGlueInfo->prP2PInfo[ucRoleIdx]->fgChannelSwitchReq = TRUE;
-		kalP2pIndicateChnlSwitch(prGlueInfo->prAdapter, prBssInfo);
-	}
 }
 
 void kalP2PGenP2P_IE(struct GLUE_INFO *prGlueInfo,
@@ -1410,6 +1401,9 @@ void kalP2PIndicateMgmtTxStatus(struct GLUE_INFO *prGlueInfo,
 				"prNetdevice is not ready or NULL!\n");
 			break;
 		}
+
+		p2pFuncRemovePendingMgmtLinkEntry(prGlueInfo->prAdapter,
+			prMsduInfo->ucBssIndex, *pu8GlCookie);
 
 		cfg80211_mgmt_tx_status(
 			/* struct net_device * dev, */
@@ -2344,7 +2338,8 @@ void kalP2pIndicateAcsResult(struct GLUE_INFO *prGlueInfo,
 	case MAX_BW_160MHZ:
 		ch_width = 160;
 		break;
-	case MAX_BW_320MHZ:
+	case MAX_BW_320_1MHZ:
+	case MAX_BW_320_2MHZ:
 		ch_width = 320;
 		break;
 	default:
@@ -2875,3 +2870,206 @@ u_int8_t kalGetP2pDevScanSpecificSSID(struct GLUE_INFO *prGlueInfo)
 
 	return fgScanSpecificSSID;
 }
+
+void kalP2pIndicateListenOffloadEvent(
+	struct GLUE_INFO *prGlueInfo,
+	uint32_t event)
+{
+	struct GL_P2P_INFO *prGlueP2pInfo =
+		(struct GL_P2P_INFO *) NULL;
+	struct sk_buff *vendor_event = NULL;
+
+	prGlueP2pInfo = prGlueInfo->prP2PInfo[0];
+	if (!prGlueP2pInfo) {
+		DBGLOG(P2P, ERROR, "p2p glue info null.\n");
+		return;
+	}
+
+	vendor_event =
+		cfg80211_vendor_event_alloc(
+		prGlueP2pInfo->prWdev->wiphy,
+		prGlueP2pInfo->prWdev,
+		sizeof(uint32_t) + NLMSG_HDRLEN,
+		WIFI_EVENT_P2P_LISTEN_OFFLOAD,
+		GFP_KERNEL);
+	if (!vendor_event) {
+		DBGLOG(P2P, ERROR, "allocate vendor event fail.\n");
+		goto nla_put_failure;
+	}
+
+	if (unlikely(nla_put_u32(vendor_event,
+		QCA_WLAN_VENDOR_ATTR_P2P_LO_STOP_REASON,
+		event) < 0)) {
+		DBGLOG(P2P, ERROR, "put freq fail.\n");
+		goto nla_put_failure;
+	}
+
+	cfg80211_vendor_event(vendor_event, GFP_KERNEL);
+
+	DBGLOG(P2P, INFO,
+		"p2p_lo event: %d\n", event);
+
+	return;
+
+nla_put_failure:
+	if (vendor_event)
+		kfree_skb(vendor_event);
+}
+
+#if CFG_SUPPORT_IDC_RIL_BRIDGE
+struct CP_NOTI_INFO {
+	uint8_t ucRat; /* LTE or NR */
+	uint32_t u4Band;
+	uint32_t u4Channel;
+} __packed;
+#if !CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY
+struct dev_ril_bridge_msg {
+	unsigned int dev_id;
+	unsigned int data_len;
+	void *data;
+};
+#endif
+
+void kalSetRilBridgeChannelInfo(
+	struct ADAPTER *prAdapter,
+	uint8_t ucRat,
+	uint32_t u4Band,
+	uint32_t u4Channel)
+{
+	struct CMD_SET_IDC_RIL_BRIDGE *prCmd;
+	uint16_t u2CmdBufLen = 0;
+
+	do {
+		if (!prAdapter)
+			break;
+
+		u2CmdBufLen =
+			sizeof(struct CMD_SET_IDC_RIL_BRIDGE);
+
+		prCmd = (struct CMD_SET_IDC_RIL_BRIDGE *)
+			cnmMemAlloc(prAdapter, RAM_TYPE_MSG,
+			u2CmdBufLen);
+		if (!prCmd) {
+			DBGLOG(P2P, ERROR,
+				"cnmMemAlloc for prCmd failed!\n");
+			break;
+		}
+
+		prCmd->ucRat = ucRat;
+		prCmd->u4Band = u4Band;
+		prCmd->u4Channel = u4Channel;
+
+		DBGLOG(INIT, TRACE,
+			"Update CP channel info [%d,%d,%d]\n",
+			prCmd->ucRat,
+			prCmd->u4Band,
+			prCmd->u4Channel);
+
+		wlanSendSetQueryCmd(prAdapter,
+			CMD_ID_SET_IDC_RIL,
+			TRUE,
+			FALSE,
+			FALSE,
+			NULL,
+			NULL,
+			u2CmdBufLen,
+			(uint8_t *) prCmd,
+			NULL,
+			0);
+
+		cnmMemFree(prAdapter, prCmd);
+	} while (FALSE);
+}
+
+static int g_init_ril_notifier;
+static int kalIdcRilNotifier(
+	struct notifier_block *nb,
+	unsigned long size,
+	void *buf)
+{
+	struct dev_ril_bridge_msg *msg;
+	struct CP_NOTI_INFO *cmd;
+	struct GLUE_INFO *prGlueInfo = NULL;
+
+	if (!g_init_ril_notifier) {
+		DBGLOG(INIT, ERROR,
+			"Not init ril notifier\n");
+		return NOTIFY_DONE;
+	}
+
+	prGlueInfo = wlanGetGlueInfo();
+	if (!prGlueInfo ||
+		!prGlueInfo->prAdapter) {
+		DBGLOG(INIT, WARN,
+			   "prGlueInfo invalid!!\n");
+		return NOTIFY_DONE;
+	}
+
+	DBGLOG(INIT, LOUD,
+		"ril notification size %d\n", size);
+
+	msg = (struct dev_ril_bridge_msg *)buf;
+
+	DBGLOG(INIT, LOUD,
+		"dev_id : %d, data_len : %d\n",
+		msg->dev_id, msg->data_len);
+
+	if (msg->dev_id == IDC_RIL_CHANNEL_INFO
+		&& msg->data_len ==
+		sizeof(struct CP_NOTI_INFO)) {
+
+		cmd = (struct CP_NOTI_INFO *)msg->data;
+
+		DBGLOG(INIT, TRACE,
+			"Update CP channel info [%d,%d,%d]\n",
+			cmd->ucRat, cmd->u4Band, cmd->u4Channel);
+
+		/* rat mode : LTE (3), NR5G (7) */
+		if ((cmd->ucRat == IDC_RIL_BRIDGE_LTE) ||
+			(cmd->ucRat == IDC_RIL_BRIDGE_NR))
+			kalSetRilBridgeChannelInfo(
+				prGlueInfo->prAdapter,
+				cmd->ucRat,
+				cmd->u4Band,
+				cmd->u4Channel);
+
+		return NOTIFY_OK;
+	}
+
+	return NOTIFY_DONE;
+}
+#endif
+#if CFG_SUPPORT_IDC_RIL_BRIDGE_NOTIFY
+static struct notifier_block g_ril_notifier_block = {
+	.notifier_call = kalIdcRilNotifier,
+};
+
+void kalIdcRegisterRilNotifier(void)
+{
+	if (!g_init_ril_notifier) {
+		int val = 1;
+
+		DBGLOG(INIT, INFO, "Register RIL Notifier\n");
+
+		register_dev_ril_bridge_event_notifier(
+			&g_ril_notifier_block);
+
+		dev_ril_bridge_send_msg(
+			IDC_RIL_CHANNEL_INFO,
+			sizeof(int), &val);
+
+		g_init_ril_notifier = 1;
+	}
+}
+
+void kalIdcUnregisterRilNotifier(void)
+{
+	if (!g_init_ril_notifier) {
+		unregister_dev_ril_bridge_event_notifier(
+			&g_ril_notifier_block);
+		g_init_ril_notifier = 0;
+		DBGLOG(INIT, INFO, "Unregister RIL Notifier\n");
+	}
+}
+#endif
+

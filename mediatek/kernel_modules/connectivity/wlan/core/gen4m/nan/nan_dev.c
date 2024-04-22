@@ -77,19 +77,26 @@ nanDevInit(struct ADAPTER *prAdapter, uint8_t ucIdx) {
 
 #if (CFG_SUPPORT_DBDC == 1)
 		if (ucIdx == NAN_BSS_INDEX_BAND1) {
-			prnanBssInfo->ucPhyTypeSet =
-				prWifiVar->ucAvailablePhyTypeSet &
-				PHY_TYPE_SET_802_11ANAC;
 #if (CFG_SUPPORT_802_11AX == 1)
 			prnanBssInfo->ucPhyTypeSet =
 				prWifiVar->ucAvailablePhyTypeSet &
 				PHY_TYPE_SET_802_11ABGNACAX;
+#else
+			prnanBssInfo->ucPhyTypeSet =
+				prWifiVar->ucAvailablePhyTypeSet &
+				PHY_TYPE_SET_802_11ANAC;
 #endif
 		} else {
 #endif
+#if (CFG_SUPPORT_802_11AX == 1)
+			prnanBssInfo->ucPhyTypeSet =
+				prWifiVar->ucAvailablePhyTypeSet &
+				PHY_TYPE_SET_802_11ABGNACAX;
+#else
 			prnanBssInfo->ucPhyTypeSet =
 				prWifiVar->ucAvailablePhyTypeSet &
 				PHY_TYPE_SET_802_11BGN;
+#endif
 		}
 
 		prnanBssInfo->ucNonHTBasicPhyType = ucLegacyPhyTp;
@@ -140,7 +147,14 @@ nanDevInit(struct ADAPTER *prAdapter, uint8_t ucIdx) {
 
 		prnanBssInfo->ucVhtChannelFrequencyS1 = 0;
 		prnanBssInfo->ucVhtChannelFrequencyS2 = 0;
-		if (prWifiVar->ucNanBandwidth >= MAX_BW_40MHZ) {
+
+		/* NAN En/Dis BW40 in Assoc IE */
+		if ((prnanBssInfo->eBand == BAND_5G
+				&& prWifiVar->ucNan5gBandwidth
+				>= MAX_BW_40MHZ) ||
+			(prnanBssInfo->eBand == BAND_2G4
+				&& prWifiVar->ucNan2gBandwidth
+				>= MAX_BW_40MHZ)) {
 			prnanBssInfo->eBssSCO = CHNL_EXT_SCA;
 			prnanBssInfo->ucHtOpInfo1 |=
 				HT_OP_INFO1_STA_CHNL_WIDTH;
@@ -153,6 +167,13 @@ nanDevInit(struct ADAPTER *prAdapter, uint8_t ucIdx) {
 			prnanBssInfo->u2BSSBasicRateSet,
 			prnanBssInfo->aucAllSupportedRates,
 			&prnanBssInfo->ucAllSupportedRatesLen);
+
+		/* Set DBRTS to 0x3FF as defalt */
+		prnanBssInfo->ucHeOpParams[0] |=
+			HE_OP_PARAM0_TXOP_DUR_RTS_THRESHOLD_MASK;
+		prnanBssInfo->ucHeOpParams[1] |=
+			HE_OP_PARAM1_TXOP_DUR_RTS_THRESHOLD_MASK;
+
 		/* Activate NAN BSS */
 		if (!IS_BSS_ACTIVE(
 			    prAdapter->aprBssInfo
@@ -688,7 +709,8 @@ nanDevSendEnableRequest(struct ADAPTER *prAdapter,
 			prAdapter->aprBssInfo[prNANSpecInfo->ucBssIndex];
 
 		if (!IS_BSS_ACTIVE(prnanBssInfo))
-			nicActivateNetwork(prAdapter, prnanBssInfo->ucBssIndex);
+			nicActivateNetworkEx(prAdapter,
+				prnanBssInfo->ucBssIndex, FALSE);
 
 		prnanBssInfo->eConnectionState = MEDIA_STATE_CONNECTED;
 

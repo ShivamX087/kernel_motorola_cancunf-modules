@@ -88,17 +88,20 @@
 		(PM_UAPSD_AC0 | PM_UAPSD_AC1 | PM_UAPSD_AC2 | PM_UAPSD_AC3)
 #define PM_UAPSD_NONE                       0
 
-#define LP_OWN_BACK_TOTAL_DELAY_MS      2048	/* exponential of 2 */
-#define LP_OWN_BACK_LOOP_DELAY_MS       1	/* exponential of 2 */
-#define LP_OWN_REQ_CLR_INTERVAL_MS	200
+#define LP_OWN_BACK_TOTAL_DELAY_MS			2000
+#define LP_OWN_BACK_TOTAL_DELAY_CASAN_MS	3000
+#define LP_OWN_BACK_TOTAL_DELAY_MD_MS		750
+#define LP_OWN_BACK_FAILED_LOG_SKIP_MS			2000	/* for retry maximum */
+#define LP_OWN_BACK_FAILED_LOG_SKIP_CASAN_MS	3000	/* for retry maximum */
 #define LP_OWN_BACK_FAILED_RETRY_CNT    5
-#define LP_OWN_BACK_FAILED_LOG_SKIP_MS  750
-#define LP_OWN_BACK_FAILED_LOG_SKIP_CASAN_MS  2000
 #define LP_OWN_BACK_FAILED_RESET_CNT    0
 #define LP_OWN_BACK_FAILED_DBGCR_POLL_ROUND	5
-#define LP_DBGCR_POLL_ROUND				1
+#define LP_OWN_BACK_LOOP_DELAY_MS       1	/* exponential of 2 */
 #define LP_OWN_BACK_LOOP_DELAY_MIN_US   900
 #define LP_OWN_BACK_LOOP_DELAY_MAX_US   1000
+#define LP_OWN_REQ_CLR_INTERVAL_MS		200
+#define LP_DBGCR_POLL_ROUND				1
+
 
 /*******************************************************************************
  *                             D A T A   T Y P E S
@@ -133,14 +136,21 @@ struct PM_PROFILE_SETUP_INFO {
 #define ACQUIRE_POWER_CONTROL_FROM_PM(_prAdapter)
 #define RECLAIM_POWER_CONTROL_TO_PM(_prAdapter, _fgEnableGINT_in_IST)
 #else
+
 #define ACQUIRE_POWER_CONTROL_FROM_PM(_prAdapter) \
 	{ \
-			nicpmSetDriverOwn(_prAdapter); \
+		if (_prAdapter->prGlueInfo->drv_own_caller[0] == 0) \
+			strlcpy(_prAdapter->prGlueInfo->drv_own_caller, \
+			__func__, CALLER_LENGTH); \
+		nicpmSetDriverOwn(_prAdapter); \
 	}
 
 #define RECLAIM_POWER_CONTROL_TO_PM(_prAdapter, _fgEnableGINT_in_IST) \
 	{ \
-			nicpmSetFWOwn(_prAdapter, _fgEnableGINT_in_IST); \
+		if (_prAdapter->prGlueInfo->fw_own_caller[0] == 0) \
+			strlcpy(_prAdapter->prGlueInfo->fw_own_caller, \
+			__func__, CALLER_LENGTH); \
+		nicpmSetFWOwn(_prAdapter, _fgEnableGINT_in_IST); \
 	}
 #endif
 

@@ -392,6 +392,12 @@ enum ENUM_CMD_ID {
 #endif
 	CMD_ID_SET_RDD_CH           = 0xE1,
 
+	CMD_ID_SET_P2P_LO_START    = 0xE2, /* 0xE2 (Set) */
+	CMD_ID_SET_P2P_LO_STOP     = 0xE3, /* 0xE3 (Set) */
+
+#if CFG_SUPPORT_IDC_RIL_BRIDGE
+	CMD_ID_SET_IDC_RIL         = 0xE4, /* 0xE4 (Set) */
+#endif
 	CMD_ID_NAN_EXT_CMD = 0XEB,
 
 	CMD_ID_LAYER_0_EXT_MAGIC_NUM    = 0xED,
@@ -581,7 +587,7 @@ enum ENUM_EVENT_ID {
 #endif
 
 #if CFG_SUPPORT_BAR_DELAY_INDICATION
-	EVENT_ID_RXM_DELAY_BAR = 0xB5,
+	EVENT_ID_DELAY_BAR = 0xB5,
 #endif /* CFG_SUPPORT_BAR_DELAY_INDICATION */
 
 	EVENT_ID_TPUT_INFO = 0xCB,
@@ -599,6 +605,8 @@ enum ENUM_EVENT_ID {
 #if CFG_WIFI_TXPWR_TBL_DUMP
 	EVENT_ID_GET_TXPWR_TBL = 0xD0,
 #endif
+	EVENT_ID_P2P_LO_STOP = 0xE3,        /* 0xE3 (Unsolicited) */
+
 	EVENT_ID_FAST_PATH = 0xD5,
 
 	EVENT_ID_NIC_CAPABILITY_V2 = 0xEC,
@@ -1167,6 +1175,35 @@ struct CMD_SET_GC_CSA_STRUCT {
 	uint8_t aucReserved[1];
 };
 
+struct CMD_SET_P2P_LO_START_STRUCT {
+	uint8_t ucBssIndex;
+	uint8_t aucReserved1[3];
+	uint16_t u2ListenPrimaryCh;
+	uint16_t u2Period;
+	uint16_t u2Interval;
+	uint16_t u2Count;
+	uint32_t u4IELen;
+	uint8_t aucReserved2[8];
+	uint8_t aucIE[0];
+};
+
+struct CMD_SET_P2P_LO_STOP_STRUCT {
+	uint8_t ucBssIndex;
+	uint8_t aucReserved[3];
+};
+
+#if CFG_SUPPORT_IDC_RIL_BRIDGE
+#define IDC_RIL_CHANNEL_INFO (0x01)
+#define IDC_RIL_BRIDGE_LTE (3)
+#define IDC_RIL_BRIDGE_NR (7)
+
+struct CMD_SET_IDC_RIL_BRIDGE {
+	uint8_t ucRat; /* LTE or NR */
+	uint32_t u4Band;
+	uint32_t u4Channel;
+};
+#endif
+
 struct CMD_CUSTOM_UAPSD_PARAM_STRUCT {
 	uint8_t  fgEnAPSD;
 	uint8_t  fgEnAPSD_AcBe;
@@ -1530,7 +1567,7 @@ struct EVENT_ADD_KEY_DONE_INFO {
  * because we must ensure event structure no change
  */
 #define BAR_DELAY_INDICATION_BA_MAX 80
-struct EVENT_STORED_BA_REQUEST {
+struct EVENT_STORED_BAR_INFO {
 	uint16_t u2SSN;
 	uint8_t ucTid;
 	uint8_t ucStaRecIdx;
@@ -1542,8 +1579,8 @@ struct EVENT_BAR_DELAY {
 	uint8_t ucEvtVer;
 	uint8_t ucBaNum;
 	uint8_t aucPadding[2];
-	struct EVENT_STORED_BA_REQUEST
-		rBAR[BAR_DELAY_INDICATION_BA_MAX];
+	struct EVENT_STORED_BAR_INFO
+		arBAR[BAR_DELAY_INDICATION_BA_MAX];
 };
 #endif /* CFG_SUPPORT_BAR_DELAY_INDICATION */
 
@@ -2241,6 +2278,20 @@ struct EVENT_GC_CSA_T {
 	uint8_t ucChannel;
 	uint8_t ucBand;
 	uint8_t aucReserved[2];
+};
+
+#define P2P_LO_STOPPED_REASON_COMPLETE 0
+#define P2P_LO_STOPPED_REASON_RECV_STOP_CMD 1
+#define P2P_LO_STOPPED_REASON_INVALID_PARAM 2
+#define P2P_LO_STOPPED_REASON_NOT_SUPPORTED 255
+
+struct EVENT_P2P_LO_STOP_T {
+	uint8_t ucBssIndex;
+	uint8_t aucReserved1[3];
+	uint16_t u2ListenCount;
+	uint8_t aucReserved2[2];
+	uint32_t u4Reason;
+	uint8_t aucReserved3[8];
 };
 
 #define EVENT_GET_CNM_BAND_NUM          2  /* ENUM_BAND_NUM*/

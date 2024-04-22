@@ -107,11 +107,12 @@
 #include <linux/kobject.h>
 
 /* for wifi standalone log */
-#define CREATE_TRACE_POINTS
-#include "mtk_wifi_trace.h"
+#if CFG_SUPPORT_SA_LOG
+#include "gl_sa_log.h"
 #include <linux/jiffies.h>
 #include <linux/ratelimit.h>
 #include <linux/rtc.h>
+#endif
 
 /* for ATF smc call */
 #if (CFG_WLAN_ATF_SUPPORT == 1)
@@ -219,7 +220,9 @@ static struct notifier_block wlan_fb_notifier = {
 
 static struct miscdevice wlan_object;
 
+#if CFG_SUPPORT_SA_LOG
 static unsigned long rtc_update;
+#endif
 
 #if (CFG_VOLT_INFO == 1)
 static struct VOLT_INFO_T _rVnfInfo = {
@@ -279,7 +282,7 @@ static uint8_t *apucCr4FwName[] = {
 	NULL
 };
 
-#if !CONFIG_WLAN_DRV_BUILD_IN
+#if (CONFIG_WLAN_DRV_BUILD_IN == 0) && (BUILD_QA_DBG == 1)
 /*----------------------------------------------------------------------------*/
 /*!
  * \brief  To leverage systrace, use the same name, i.e. tracing_mark_write,
@@ -1666,6 +1669,43 @@ uint8_t *kal_skb_pull(void *pvPacket, uint32_t u4Length)
 	return prSkbBuff;
 }
 
+/**
+ * Detect and attempt to fix the wrong pointer problem if
+ * pucRecvBuff and prRxStatus were changed and different from skb->head.
+ *
+ * If error detected and recoverable,
+ * prSwRfb->pucRecvBuff = prSwRfb->prRxStatus = skb->data;
+ * In case when CFG_SUPPORT_SNIFFER_RADIOTAP was defined, there will be
+ * a 128-byte headroom (skb->data - skb->head).
+ *
+ * @return
+ *	WLAN_STATUS_SUCCESS: OK
+ *	WLAN_STATUS_INVALID_DATA: wrong pointer fixed
+ *	WLAN_STATUS_INVALID_PACKET: unrecoverable error
+ */
+uint32_t kalDuplicateSwRfbSanity(struct SW_RFB *prSwRfb)
+{
+	struct sk_buff *skb = prSwRfb->pvPacket;
+	uint32_t offset = 0;
+
+#ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
+	offset = CFG_RADIOTAP_HEADROOM;
+#endif
+
+	if (likely(skb->data == prSwRfb->pucRecvBuff &&
+		   skb->data == prSwRfb->prRxStatus))
+		return WLAN_STATUS_SUCCESS;
+
+	if (likely(((uintptr_t)(const void *)skb->head & 0xFFF) == 0 &&
+		   skb->data - skb->head == offset)) {
+		prSwRfb->pucRecvBuff = skb->data;
+		prSwRfb->prRxStatus = skb->data;
+		return WLAN_STATUS_INVALID_DATA;
+	}
+
+	return WLAN_STATUS_INVALID_PACKET;
+}
+
 void kalSkbReuseCheck(struct SW_RFB *prSwRfb)
 {
 #if CFG_SUPPORT_RX_PAGE_POOL
@@ -1692,7 +1732,13 @@ void kalSkbReuseCheck(struct SW_RFB *prSwRfb)
 			skb_headroom(prSkb));
 		kalKfreeSkb(prSwRfb->pvPacket, TRUE);
 		prSwRfb->pvPacket = NULL;
-		dump_stack();
+	}
+
+	/* sanity check */
+	if (prSwRfb->pucRecvBuff != prSkb->data) {
+		DBGLOG(NIC, ERROR, "RX buffer not match, %04X != %04X\n",
+			(uintptr_t)prSwRfb->pucRecvBuff & 0xFFFF,
+			(uintptr_t)prSkb->data & 0xFFFF);
 	}
 #endif /* CFG_SUPPORT_RX_PAGE_POOL */
 }
@@ -2435,9 +2481,21 @@ kalIndicateStatusAndComplete(struct GLUE_INFO
 				cfg80211_roamed(prDevHandler,
 					&rRoamInfo, GFP_KERNEL);
 #if KERNEL_VERSION(4, 15, 0) <= CFG80211_VERSION_CODE
+#if KERNEL_VERSION(5, 15, 78) <= CFG80211_VERSION_CODE
+#if (CFG_ADVANCED_80211_MLO == 1)
+				if (ucAuthorized)
+					cfg80211_port_authorized(prDevHandler,
+						arBssid, NULL, 0, GFP_KERNEL);
+#else
 				if (ucAuthorized)
 					cfg80211_port_authorized(prDevHandler,
 						arBssid, GFP_KERNEL);
+#endif
+#else
+				if (ucAuthorized)
+					cfg80211_port_authorized(prDevHandler,
+						arBssid, GFP_KERNEL);
+#endif
 #endif
 #else
 				cfg80211_roamed_bss(
@@ -2664,6 +2722,18 @@ kalIndicateStatusAndComplete(struct GLUE_INFO
 			kalMemFree(prConnSettings->pucAssocIEs, VIR_MEM_TYPE,
 				   prConnSettings->assocIeLen);
 			prConnSettings->assocIeLen = 0;
+		}
+
+		if (prConnSettings && prConnSettings->u4RspIeLength > 0) {
+			kalMemFree(prConnSettings->aucRspIe, VIR_MEM_TYPE,
+				prConnSettings->u4RspIeLength);
+			prConnSettings->u4RspIeLength = 0;
+		}
+
+		if (prConnSettings && prConnSettings->u4ReqIeLength > 0) {
+			kalMemFree(prConnSettings->aucReqIe, VIR_MEM_TYPE,
+				prConnSettings->u4ReqIeLength);
+			prConnSettings->u4ReqIeLength = 0;
 		}
 
 		prFtIEs = aisGetFtIe(prAdapter, ucBssIndex);
@@ -2927,6 +2997,34 @@ kalIndicateStatusAndComplete(struct GLUE_INFO
 				u2JoinStatus,
 				GFP_KERNEL);
 #endif
+
+		if (prConnSettings && prConnSettings->assocIeLen > 0) {
+			kalMemFree(prConnSettings->pucAssocIEs, VIR_MEM_TYPE,
+				   prConnSettings->assocIeLen);
+			prConnSettings->assocIeLen = 0;
+		}
+
+		if (prConnSettings && prConnSettings->u4RspIeLength > 0) {
+			kalMemFree(prConnSettings->aucRspIe, VIR_MEM_TYPE,
+				prConnSettings->u4RspIeLength);
+			prConnSettings->u4RspIeLength = 0;
+		}
+
+		if (prConnSettings && prConnSettings->u4ReqIeLength > 0) {
+			kalMemFree(prConnSettings->aucReqIe, VIR_MEM_TYPE,
+				prConnSettings->u4ReqIeLength);
+			prConnSettings->u4ReqIeLength = 0;
+		}
+
+		prFtIEs = aisGetFtIe(prAdapter, ucBssIndex);
+		if (prFtIEs) {
+			kalMemFree(prFtIEs->pucIEBuf,
+				VIR_MEM_TYPE,
+				prFtIEs->u4IeLength);
+			kalMemZero(prFtIEs,
+				sizeof(*prFtIEs));
+		}
+
 		kalSetMediaStateIndicated(prGlueInfo,
 			MEDIA_STATE_DISCONNECTED,
 			ucBssIndex);
@@ -2973,9 +3071,6 @@ kalUpdateReAssocReqInfo(struct GLUE_INFO *prGlueInfo,
 		prGlueInfo->prAdapter,
 		ucBssIndex);
 
-	/* reset */
-	prConnSettings->u4ReqIeLength = 0;
-
 	if (fgReassocRequest) {
 		if (u4FrameBodyLen < 15) {
 			return;
@@ -3004,14 +3099,31 @@ kalUpdateReAssocReqInfo(struct GLUE_INFO *prGlueInfo,
 	wext_indicate_wext_event(prGlueInfo, IWEVASSOCREQIE, cp,
 				 u4FrameBodyLen, ucBssIndex);
 
-	if (u4FrameBodyLen > CFG_CFG80211_IE_BUF_LEN) {
+	if (u4FrameBodyLen > CONTROL_BUFFER_SIZE) {
 		DBGLOG(INIT, WARN, "Assoc Req IE truncated %d to %d",
-			u4FrameBodyLen, CFG_CFG80211_IE_BUF_LEN);
-		u4FrameBodyLen = CFG_CFG80211_IE_BUF_LEN;
+			u4FrameBodyLen, CONTROL_BUFFER_SIZE);
+		u4FrameBodyLen = CONTROL_BUFFER_SIZE;
 	}
 
-	prConnSettings->u4ReqIeLength = u4FrameBodyLen;
-	kalMemCopy(prConnSettings->aucReqIe, cp, u4FrameBodyLen);
+	if (prConnSettings->u4ReqIeLength > 0) {
+		kalMemFree(prConnSettings->aucReqIe, VIR_MEM_TYPE,
+			prConnSettings->u4ReqIeLength);
+		prConnSettings->u4ReqIeLength = 0;
+	}
+
+	if (u4FrameBodyLen > 0) {
+		prConnSettings->aucReqIe =
+			kalMemAlloc(u4FrameBodyLen, VIR_MEM_TYPE);
+
+		if (prConnSettings->aucReqIe) {
+			kalMemCopy(prConnSettings->aucReqIe, cp,
+				u4FrameBodyLen);
+			prConnSettings->u4ReqIeLength = u4FrameBodyLen;
+		} else {
+			DBGLOG(INIT, ERROR,
+				"allocate memory for prConnSettings->aucReqIe failed!\n");
+		}
+	}
 }
 
 /*----------------------------------------------------------------------------*/
@@ -3048,10 +3160,10 @@ void kalUpdateReAssocRspInfo(struct GLUE_INFO
 		return;
 	}
 
-	if (u4IELength > CFG_CFG80211_IE_BUF_LEN) {
+	if (u4IELength > CONTROL_BUFFER_SIZE) {
 		DBGLOG(INIT, WARN, "Assoc Resp IE truncated %d to %d",
-			u4IELength, CFG_CFG80211_IE_BUF_LEN);
-		u4IELength = CFG_CFG80211_IE_BUF_LEN;
+			u4IELength, CONTROL_BUFFER_SIZE);
+		u4IELength = CONTROL_BUFFER_SIZE;
 	}
 
 	DBGLOG(INIT, LOUD, "[%d] Copy assoc resp info\n", ucBssIndex);
@@ -3060,10 +3172,27 @@ void kalUpdateReAssocRspInfo(struct GLUE_INFO
 		prConnSettings = aisGetConnSettings(
 			prGlueInfo->prAdapter,
 			ucBssIndex);
-		prConnSettings->u4RspIeLength = u4IELength;
-		kalMemCopy(prConnSettings->aucRspIe,
-			pucFrameBody + u4IEOffset,
-			u4IELength);
+
+		if (prConnSettings->u4RspIeLength > 0) {
+			kalMemFree(prConnSettings->aucRspIe,
+				VIR_MEM_TYPE,
+				prConnSettings->u4RspIeLength);
+			prConnSettings->u4RspIeLength = 0;
+		}
+
+		if (u4IELength > 0) {
+			prConnSettings->aucRspIe =
+				kalMemAlloc(u4IELength, VIR_MEM_TYPE);
+
+			if (prConnSettings->aucRspIe) {
+				kalMemCopy(prConnSettings->aucRspIe,
+					pucFrameBody + u4IEOffset, u4IELength);
+				prConnSettings->u4RspIeLength = u4IELength;
+			} else {
+				DBGLOG(INIT, ERROR,
+					"allocate memory for prConnSettings->aucRspIe failed!\n");
+			}
+		}
 	} else if (!IS_BSS_APGO(bss)) {
 		struct P2P_ROLE_FSM_INFO *fsm =
 			P2P_ROLE_INDEX_2_ROLE_FSM_INFO(
@@ -4030,22 +4159,23 @@ kalOidComplete(struct GLUE_INFO *prGlueInfo,
 
 	ASSERT(prGlueInfo);
 
+	prIoReq = &prGlueInfo->OidEntry;
 	DBGLOG(NIC, TRACE, "Glue=%p Cmd=%p InformationBuffer=%p QryInfoLen=%p",
 			prGlueInfo, prCmdInfo,
 			prCmdInfo ? prCmdInfo->pvInformationBuffer : NULL,
-			prGlueInfo->OidEntry.pu4QryInfoLen);
+			prIoReq->pu4QryInfoLen);
 
 	/* remove timeout check timer */
 	wlanoidClearTimeoutCheck(prGlueInfo->prAdapter);
 
-	prGlueInfo->rPendStatus = rOidStatus;
-
-	prIoReq = &prGlueInfo->OidEntry;
-	*prIoReq->pu4QryInfoLen = u4SetQueryInfoLen;
-
-	prGlueInfo->u4OidCompleteFlag = 1;
 	/* complete ONLY if there are waiters */
 	if (!completion_done(&prGlueInfo->rPendComp)) {
+
+		/* only update when there are waiters */
+		prGlueInfo->rPendStatus = rOidStatus;
+		*prIoReq->pu4QryInfoLen = u4SetQueryInfoLen;
+		prGlueInfo->u4OidCompleteFlag = 1;
+
 		kalUpdateCompHdlrRec(prGlueInfo->prAdapter,
 			NULL, prCmdInfo);
 
@@ -4293,6 +4423,7 @@ kalIoctlByBssIdx(struct GLUE_INFO *prGlueInfo,
 	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
 	uint32_t ret = WLAN_STATUS_SUCCESS;
 	uint32_t waitRet = 0;
+	int r;
 
 	KAL_TIME_INTERVAL_DECLARATION();
 
@@ -4305,8 +4436,11 @@ kalIoctlByBssIdx(struct GLUE_INFO *prGlueInfo,
 	/* return WLAN_STATUS_ADAPTER_NOT_READY; */
 	/* } */
 
-	if (down_interruptible(&g_halt_sem))
+	r = down_killable(&g_halt_sem);
+	if (r) {
+		DBGLOG(OID, WARN, "down_killable(g_halt_sem) = %d\n", r);
 		return WLAN_STATUS_FAILURE;
+	}
 
 	if (g_u4HaltFlag) {
 		up(&g_halt_sem);
@@ -4315,7 +4449,9 @@ kalIoctlByBssIdx(struct GLUE_INFO *prGlueInfo,
 
 	ASSERT(prGlueInfo);
 
-	if (down_interruptible(&prGlueInfo->ioctl_sem)) {
+	r = down_killable(&prGlueInfo->ioctl_sem);
+	if (r) {
+		DBGLOG(OID, WARN, "down_killable(ioctl_sem) = %d\n", r);
 		up(&g_halt_sem);
 		return WLAN_STATUS_FAILURE;
 	}
@@ -4434,6 +4570,9 @@ kalIoctlByBssIdx(struct GLUE_INFO *prGlueInfo,
 			ret = prGlueInfo->rPendStatus;
 		else
 			ret = prIoReq->rStatus;
+
+		/* reset u4OidCompleteFlag when wait timeout */
+		prGlueInfo->u4OidCompleteFlag = 0;
 	} else {
 
 #if 0
@@ -5068,6 +5207,9 @@ int hif_thread(void *data)
 				  &prGlueInfo->ulFlag);
 			continue;
 		}
+
+		strlcpy(prAdapter->prGlueInfo->drv_own_caller,
+			__func__, CALLER_LENGTH);
 		wlanAcquirePowerControl(prAdapter);
 
 		/* Handle Interrupt */
@@ -5143,6 +5285,8 @@ int hif_thread(void *data)
 		halDumpHifStats(prAdapter);
 
 		/* Release to FW own */
+		strlcpy(prAdapter->prGlueInfo->fw_own_caller,
+			__func__, CALLER_LENGTH);
 		wlanReleasePowerControl(prAdapter);
 		kalTraceEnd(); /* hif_thread */
 	}
@@ -5356,7 +5500,9 @@ int main_thread(void *data)
 	DBGLOG(INIT, INFO, "%s:%u starts running...\n",
 	       KAL_GET_CURRENT_THREAD_NAME(), KAL_GET_CURRENT_THREAD_ID());
 
+#if CFG_SUPPORT_SA_LOG
 	rtc_update = jiffies;	/* update rtc_update time base */
+#endif
 
 	while (TRUE) {
 #ifdef UT_TEST_MODE
@@ -5400,6 +5546,10 @@ int main_thread(void *data)
 				      prTxThreadWakeLock);
 #endif
 		kalTraceBegin("main_thread");
+
+		if (test_and_clear_bit(GLUE_FLAG_DISABLE_PERF_BIT,
+			&prGlueInfo->ulFlag))
+			kalPerMonDisable(prGlueInfo);
 
 #if CFG_ENABLE_WIFI_DIRECT
 		/*run p2p multicast list work. */
@@ -5467,8 +5617,9 @@ int main_thread(void *data)
 			if (prGlueInfo->fgSdioReadWriteMode == TRUE) {
 				/* read test */
 				kalDevPortRead(prGlueInfo, MCR_WTMDR, 256,
-				       prGlueInfo->aucSdioTestBuffer,
-				       sizeof(prGlueInfo->aucSdioTestBuffer));
+					prGlueInfo->aucSdioTestBuffer,
+					sizeof(prGlueInfo->aucSdioTestBuffer),
+					FALSE);
 			} else {
 				/* write test */
 				kalDevPortWrite(prGlueInfo, MCR_WTMDR, 172,
@@ -9281,6 +9432,9 @@ inline int32_t kalPerMonDisable(struct GLUE_INFO
 {
 	struct PERF_MONITOR *prPerMonitor;
 
+	if (!prGlueInfo->prAdapter)
+		return 0;
+
 	prPerMonitor = &prGlueInfo->prAdapter->rPerMonitor;
 
 	DBGLOG(SW4, INFO, "enter %s\n", __func__);
@@ -9300,12 +9454,33 @@ inline int32_t kalPerMonEnable(struct GLUE_INFO
 {
 	struct PERF_MONITOR *prPerMonitor;
 
+	if (!prGlueInfo->prAdapter)
+		return 0;
+
 	prPerMonitor = &prGlueInfo->prAdapter->rPerMonitor;
 
 	DBGLOG(SW4, INFO, "enter %s\n", __func__);
 	KAL_CLR_BIT(PERF_MON_DISABLE_BIT,
 		    prPerMonitor->ulPerfMonFlag);
 	DBGLOG(SW4, TRACE, "exit %s\n", __func__);
+	return 0;
+}
+
+inline int32_t kalSetPerMonEnable(struct GLUE_INFO *prGlueInfo)
+{
+	DBGLOG(SW4, INFO, "enter %s\n", __func__);
+	clear_bit(GLUE_FLAG_DISABLE_PERF_BIT, &prGlueInfo->ulFlag);
+	kalPerMonEnable(prGlueInfo);
+	DBGLOG(SW4, LOUD, "exit %s\n", __func__);
+	return 0;
+}
+
+inline int32_t kalSetPerMonDisable(struct GLUE_INFO *prGlueInfo)
+{
+	DBGLOG(SW4, INFO, "enter %s\n", __func__);
+	set_bit(GLUE_FLAG_DISABLE_PERF_BIT, &prGlueInfo->ulFlag);
+	wake_up_interruptible(&prGlueInfo->waitq);
+	DBGLOG(SW4, LOUD, "exit %s\n", __func__);
 	return 0;
 }
 
@@ -9395,11 +9570,22 @@ inline int32_t kalPerMonStop(struct GLUE_INFO
 inline int32_t kalPerMonDestroy(struct GLUE_INFO
 				*prGlueInfo)
 {
-	struct PERF_MONITOR *prPerMonitor = &prGlueInfo->prAdapter->rPerMonitor;
+	struct ADAPTER *prAdapter;
+	struct PERF_MONITOR *prPerMonitor;
 
+	if (!prGlueInfo)
+		goto end;
+
+	prAdapter = prGlueInfo->prAdapter;
+	if (!prAdapter)
+		goto end;
+
+	prPerMonitor = &prAdapter->rPerMonitor;
 	kalPerMonDisable(prGlueInfo);
 	KAL_CLR_BIT(PERF_MON_INIT_BIT, prPerMonitor->ulPerfMonFlag);
 	DBGLOG(SW4, INFO, "exit %s\n", __func__);
+
+end:
 	return 0;
 }
 
@@ -9726,7 +9912,7 @@ static uint32_t kalPerMonUpdate(struct ADAPTER *prAdapter)
 #if (CFG_SUPPORT_HOST_OFFLOAD == 1)
 #define RRO_LOG_TEMPLATE \
 	"RRO[%d,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu," \
-	"%lu,%lu] "
+	"%lu,%lu,%lu] "
 #else /* CFG_SUPPORT_HOST_OFFLOAD == 1 */
 #define RRO_LOG_TEMPLATE ""
 #endif /* CFG_SUPPORT_HOST_OFFLOAD == 1 */
@@ -9744,9 +9930,9 @@ static uint32_t kalPerMonUpdate(struct ADAPTER *prAdapter)
 	"RxReorder[%s] " \
 	RRB_TRACK_TEMPLATE \
 	"drv[RM,IL,RI,RT,RM,RW,RA,RB,DT,NS,IB,HS,LS,DD,ME,BD,NI," \
-	"DR,TE,CE,DN,FE,DE,IE,TME,ID,NL]:%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu," \
-	"%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu," \
-	"%lu,%lu\n"
+	"DR,TE,PE,CE,DN,FE,DE,IE,TME,ID,NL]:%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu," \
+	"%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu," \
+	"%lu,%lu,%lu\n"
 
 	DBGLOG(SW4, INFO, TEMP_LOG_TEMPLATE,
 		head3,
@@ -9772,6 +9958,7 @@ static uint32_t kalPerMonUpdate(struct ADAPTER *prAdapter)
 		RX_RRO_GET_CNT(&prAdapter->rRxCtrl, RRO_NOT_RRO_PKT),
 		RX_RRO_GET_CNT(&prAdapter->rRxCtrl, RRO_TIMEOUT_STEP_ONE),
 		RX_RRO_GET_CNT(&prAdapter->rRxCtrl, RRO_TIMEOUT_FLUSH_ALL),
+		RX_RRO_GET_CNT(&prAdapter->rRxCtrl, RRO_BUF_RUN_OUT),
 		/* used when recv abnormal reason */
 		RX_RRO_GET_CNT(&prAdapter->rRxCtrl, RRO_COUNTER_NUM),
 #endif /* CFG_SUPPORT_HOST_OFFLOAD == 1 */
@@ -9817,6 +10004,7 @@ static uint32_t kalPerMonUpdate(struct ADAPTER *prAdapter)
 		RX_GET_CNT(&prAdapter->rRxCtrl, RX_NO_INTEREST_DROP_COUNT),
 		RX_GET_CNT(&prAdapter->rRxCtrl, RX_REORDER_BEHIND_DROP_COUNT),
 		RX_GET_CNT(&prAdapter->rRxCtrl, RX_TYPE_ERR_DROP_COUNT),
+		RX_GET_CNT(&prAdapter->rRxCtrl, RX_POINTER_ERR_DROP_COUNT),
 		RX_GET_CNT(&prAdapter->rRxCtrl, RX_CLASS_ERR_DROP_COUNT),
 		RX_GET_CNT(&prAdapter->rRxCtrl, RX_DST_NULL_DROP_COUNT),
 		RX_GET_CNT(&prAdapter->rRxCtrl, RX_FCS_ERR_DROP_COUNT),
@@ -10279,7 +10467,7 @@ uint32_t __weak kalGetLittleCpuBoostThreshold(void)
 }
 #endif /* CFG_SUPPORT_LITTLE_CPU_BOOST */
 
-uint32_t __weak kalGetFwVerOffsetAddr(void)
+uint32_t __weak kalGetFwVerOffset(void)
 {
 	DBGLOG(SW4, WARN, "NO firmware version build.\n");
 	return 0;
@@ -10498,40 +10686,67 @@ int32_t kalPerMonSetForceEnableFlag(uint8_t uFlag)
 static int wlan_fb_notifier_callback(struct notifier_block
 				     *self, unsigned long event, void *data)
 {
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+	int32_t *pData = (int32_t *)data;
+#else
 	struct fb_event *evdata = data;
+#endif
 	int32_t blank = 0;
 	struct GLUE_INFO *prGlueInfo = (struct GLUE_INFO *)
 				       wlan_fb_notifier_priv_data;
 
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+	blank = *pData;
+#else
+	blank = *(int32_t *)evdata->data;
+#endif
+
 	/* If we aren't interested in this event, skip it immediately ... */
-	if ((event != FB_EVENT_BLANK) || !prGlueInfo)
-		return 0;
+	if ((event !=
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+		MTK_DISP_EARLY_EVENT_BLANK
+#else
+		FB_EVENT_BLANK
+#endif
+		) || !prGlueInfo)
+		goto end;
+
+	DBGLOG(SW4, INFO, "%s: event[%ld], blank[%d]\n", __func__,
+			event, blank);
 
 	if (kalHaltTryLock())
-		return 0;
+		goto end;
 
 	if (kalIsHalted()) {
 		kalHaltUnlock();
-		return 0;
+		goto end;
 	}
 
-	blank = *(int32_t *)evdata->data;
-
 	switch (blank) {
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+	case MTK_DISP_BLANK_UNBLANK:
+#else
 	case FB_BLANK_UNBLANK:
-		kalPerMonEnable(prGlueInfo);
+#endif
+		kalSetPerMonEnable(prGlueInfo);
 		wlan_fb_power_down = FALSE;
 		break;
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+	case MTK_DISP_BLANK_POWERDOWN:
+#else
 	case FB_BLANK_POWERDOWN:
+#endif
 		wlan_fb_power_down = TRUE;
 		if (!wlan_perf_monitor_force_enable)
-			kalPerMonDisable(prGlueInfo);
+			kalSetPerMonDisable(prGlueInfo);
 		break;
 	default:
 		break;
 	}
 
 	kalHaltUnlock();
+	DBGLOG(SW4, INFO, "%s: end\n", __func__);
+end:
 	return 0;
 }
 
@@ -10541,7 +10756,12 @@ int32_t kalFbNotifierReg(struct GLUE_INFO *prGlueInfo)
 
 	wlan_fb_notifier_priv_data = prGlueInfo;
 
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+	i4Ret = mtk_disp_notifier_register("wlan_fb_notifier",
+			&wlan_fb_notifier);
+#else
 	i4Ret = fb_register_client(&wlan_fb_notifier);
+#endif
 	if (i4Ret)
 		DBGLOG(SW4, WARN, "Register wlan_fb_notifier failed:%d\n",
 		       i4Ret);
@@ -10552,7 +10772,11 @@ int32_t kalFbNotifierReg(struct GLUE_INFO *prGlueInfo)
 
 void kalFbNotifierUnReg(void)
 {
+#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
+	mtk_disp_notifier_unregister(&wlan_fb_notifier);
+#else
 	fb_unregister_client(&wlan_fb_notifier);
+#endif
 	wlan_fb_notifier_priv_data = NULL;
 }
 
@@ -10560,10 +10784,12 @@ void kalFbNotifierUnReg(void)
 void kalIndicateChannelSwitch(struct GLUE_INFO *prGlueInfo,
 				enum ENUM_CHNL_EXT eSco,
 				uint8_t ucChannelNum,
-				enum ENUM_BAND eBand)
+				enum ENUM_BAND eBand,
+				uint8_t ucBssIndex)
 {
 	struct cfg80211_chan_def chandef;
 	struct ieee80211_channel *prChannel = NULL;
+	struct net_device *prDevHandler;
 	enum nl80211_channel_type rChannelType;
 	uint8_t band = 0;
 #if (CFG_ADVANCED_80211_MLO == 1)
@@ -10582,6 +10808,12 @@ void kalIndicateChannelSwitch(struct GLUE_INFO *prGlueInfo,
 
 	if (!prChannel) {
 		DBGLOG(REQ, ERROR, "ieee80211_get_channel fail!\n");
+		return;
+	}
+
+	prDevHandler = wlanGetNetDev(prGlueInfo, ucBssIndex);
+	if (!prDevHandler) {
+		DBGLOG(REQ, ERROR, "NetDev is null BssIndex[%d]!\n", ucBssIndex);
 		return;
 	}
 
@@ -10608,10 +10840,12 @@ void kalIndicateChannelSwitch(struct GLUE_INFO *prGlueInfo,
 
 	cfg80211_chandef_create(&chandef, prChannel, rChannelType);
 #if (CFG_ADVANCED_80211_MLO == 1)
-	cfg80211_ch_switch_notify(prGlueInfo->prDevHandler, &chandef, linkIdx);
+	cfg80211_ch_switch_notify(prDevHandler, &chandef, linkIdx);
 #else
-	cfg80211_ch_switch_notify(prGlueInfo->prDevHandler, &chandef);
+	cfg80211_ch_switch_notify(prDevHandler, &chandef);
 #endif
+	/* Check SAP channel */
+	p2pFuncSwitchSapChannel(prGlueInfo->prAdapter);
 }
 #endif
 
@@ -11509,6 +11743,7 @@ void kalUpdateCompHdlrRec(struct ADAPTER *prAdapter,
 					% OID_HDLR_REC_NUM;
 }
 
+#if CFG_SUPPORT_SA_LOG
 void kalPrintUTC(char *msg_buf, int msg_buf_size)
 {
 	int ret = 0;
@@ -11534,33 +11769,49 @@ void kalPrintUTC(char *msg_buf, int msg_buf_size)
 			tm_android.tm_min, tm_android.tm_sec,
 			(unsigned int)KAL_GET_USEC(tv_android));
 		if (ret < 0) {
-			kalPrintLog("[%u] snprintf failed, ret: %d",
+			kalPrintSALog("[%u] snprintf failed, ret: %d",
 				__LINE__, ret);
 		} else {
-			trace_wifi_standalone_log(msg_buf);
+			wifi_salog_write(msg_buf,
+				msg_buf_size);
 		}
 	}
 }
 
-void kalPrintTrace(char *buffer, const int len)
+void kalPrintSALog(const char *fmt, ...)
 {
-	if (buffer[len - 1] == '\n')
-		buffer[len - 1] = '\0';
+	char buffer[WIFI_LOG_MSG_BUFFER] = {0};
+	int ret = 0;
+	va_list args;
 
-	if (len < WIFI_LOG_MSG_MAX) {
-		trace_wifi_standalone_log(buffer);
+	va_start(args, fmt);
+	ret = vsnprintf(buffer, WIFI_LOG_MSG_BUFFER, fmt, args);
+	if (ret < 0) {
+		kalPrintSALog("[%u] vsnprintf failed, ret: %d",
+			__LINE__, ret);
+	}
+	va_end(args);
+
+	if (buffer[strlen(buffer) - 1] == '\n')
+		buffer[strlen(buffer) - 1] = '\0';
+
+	if (strlen(buffer) < WIFI_LOG_MSG_MAX) {
+		wifi_salog_write(buffer,
+			strlen(buffer));
 	} else {
 		char sub_buffer[WIFI_LOG_MSG_MAX];
 
 		strncpy(sub_buffer, buffer,
 			WIFI_LOG_MSG_MAX - 1);
 		sub_buffer[WIFI_LOG_MSG_MAX - 1] = '\0';
-		trace_wifi_standalone_log(sub_buffer);
+		wifi_salog_write(sub_buffer,
+			WIFI_LOG_MSG_MAX);
 
 		strncpy(sub_buffer, buffer + WIFI_LOG_MSG_MAX - 1,
 			WIFI_LOG_MSG_MAX - 1);
 		sub_buffer[WIFI_LOG_MSG_MAX - 1] = '\0';
-		trace_wifi_standalone_log(sub_buffer);
+		wifi_salog_write(sub_buffer,
+			WIFI_LOG_MSG_MAX);
 	}
 
 	if (time_after(jiffies, rtc_update)) {
@@ -11568,31 +11819,7 @@ void kalPrintTrace(char *buffer, const int len)
 		kalPrintUTC(buffer, WIFI_LOG_MSG_BUFFER);
 	}
 }
-
-void kalPrintLog(const char *fmt, ...)
-{
-	char buffer[WIFI_LOG_MSG_BUFFER];
-	int ret = 0;
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, fmt);
-	vaf.fmt = fmt;
-	vaf.va = &args;
-	ret = vsnprintf(buffer, sizeof(buffer), fmt, args);
-	if (ret < 0) {
-		kalPrintLog("[%u] vsnprintf failed, ret: %d",
-			__LINE__, ret);
-#if CFG_MTK_ANDROID_WMT
-	} else if (get_wifi_standalone_log_mode() == 1) {
-		kalPrintTrace(buffer, strlen(buffer));
-#endif
-	} else {
-		pr_info("%s%s", WLAN_TAG, buffer);
-	}
-
-	va_end(args);
-}
+#endif /* CFG_SUPPORT_SA_LOG */
 
 #if (CFG_SUPPORT_POWER_THROTTLING == 1)
 void kalPwrLevelHdlrRegister(struct ADAPTER *prAdapter,
@@ -11796,6 +12023,7 @@ void kalNanHandleVendorEvent(struct ADAPTER *prAdapter, uint8_t *prBuffer)
 	case UNI_EVENT_NAN_TAG_ID_PEER_AVAILABILITY:
 	case UNI_EVENT_NAN_TAG_ID_PEER_CAPABILITY:
 	case UNI_EVENT_NAN_TAG_ID_CRB_HANDSHAKE_TOKEN:
+	case UNI_EVENT_NAN_TAG_ID_DEVICE_CAPABILITY:
 		nanSchedulerUniEventDispatch(prAdapter, u4SubEvent,
 					  prTlvElement->aucbody);
 		break;
@@ -11819,6 +12047,9 @@ void kalNanHandleVendorEvent(struct ADAPTER *prAdapter, uint8_t *prBuffer)
 #if CFG_SUPPORT_NAN_ADVANCE_DATA_CONTROL
 	case UNI_EVENT_NAN_TAG_NDL_FLOW_CTRL:
 		nicNanNdlFlowCtrlEvt(prAdapter, prTlvElement->aucbody);
+		break;
+	case UNI_EVENT_NAN_TAG_NDL_FLOW_CTRL_V2:
+		nicNanNdlFlowCtrlEvtV2(prAdapter, prTlvElement->aucbody);
 		break;
 #endif
 	case UNI_EVENT_NAN_TAG_NDL_DISCONNECT:
@@ -11891,6 +12122,7 @@ void kalNanHandleVendorEvent(struct ADAPTER *prAdapter, uint8_t *prBuffer)
 	case NAN_EVENT_ID_PEER_AVAILABILITY:
 	case NAN_EVENT_ID_PEER_CAPABILITY:
 	case NAN_EVENT_ID_CRB_HANDSHAKE_TOKEN:
+	case NAN_EVENT_ID_DEVICE_CAPABILITY:
 		nanSchedulerEventDispatch(prAdapter, u4SubEvent,
 					  prTlvElement->aucbody);
 		break;
@@ -11914,6 +12146,9 @@ void kalNanHandleVendorEvent(struct ADAPTER *prAdapter, uint8_t *prBuffer)
 #if CFG_SUPPORT_NAN_ADVANCE_DATA_CONTROL
 	case NAN_EVENT_NDL_FLOW_CTRL:
 		nicNanNdlFlowCtrlEvt(prAdapter, prTlvElement->aucbody);
+		break;
+	case NAN_EVENT_NDL_FLOW_CTRL_V2:
+		nicNanNdlFlowCtrlEvtV2(prAdapter, prTlvElement->aucbody);
 		break;
 #endif
 	case NAN_EVENT_NDL_DISCONNECT:
@@ -12608,6 +12843,11 @@ void kalSetLogTooMuch(uint32_t u4DriverLevel,
 #endif /* KERNEL_VERSION(4, 14, 0) >= LINUX_VERSION_CODE */
 }
 
+uint64_t kalGetUIntRealTime(void)
+{
+	return ktime_get_real_ns();
+}
+
 void kalGetRealTime(struct REAL_TIME *prRealTime)
 {
 	struct rtc_time tm;
@@ -13269,39 +13509,6 @@ uint32_t kalGetChannelFrequency(
 
 }
 
-
-enum ENUM_BAND kalOperatingClassToBand(uint16_t u2OpClass)
-{
-#if (CFG_SUPPORT_WIFI_6G == 1)
-	enum nl80211_band band = KAL_BAND_6GHZ;
-#else
-	enum nl80211_band band = KAL_BAND_2GHZ;
-#endif
-	enum ENUM_BAND eBand;
-
-	ieee80211_operating_class_to_band(u2OpClass, &band);
-
-	switch (band) {
-	case KAL_BAND_2GHZ:
-		eBand = BAND_2G4;
-		break;
-	case KAL_BAND_5GHZ:
-		eBand =  BAND_5G;
-		break;
-#if (CFG_SUPPORT_WIFI_6G == 1)
-	case KAL_BAND_6GHZ:
-		eBand = BAND_6G;
-		break;
-#endif
-	default:
-		eBand = BAND_2G4;
-		break;
-	}
-
-	return eBand;
-}
-
-
 /*----------------------------------------------------------------------------*/
 /*!
  * \brief Check if Channel supported by HW
@@ -13858,27 +14065,19 @@ void kalReleaseHifStateLock(struct GLUE_INFO *prGlueInfo,
 void kalAcquirePendingCmdLock(struct ADAPTER *prAdapter,
 		unsigned long *plFlags)
 {
-#if CFG_SUPPORT_RX_WORK
-	KAL_ACQUIRE_MUTEX(prAdapter, MUTEX_CMD_PENDING);
-#else /* CFG_SUPPORT_RX_WORK */
 	KAL_SPIN_LOCK_DECLARATION();
 
 	KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_CMD_PENDING);
 	KAL_SPIN_LOCK_FLAG_SAVE(*plFlags);
-#endif /* CFG_SUPPORT_RX_WORK */
 }
 
 void kalReleasePendingCmdLock(struct ADAPTER *prAdapter,
 		unsigned long ulFlags)
 {
-#if CFG_SUPPORT_RX_WORK
-	KAL_RELEASE_MUTEX(prAdapter, MUTEX_CMD_PENDING);
-#else /* CFG_SUPPORT_RX_WORK */
 	KAL_SPIN_LOCK_DECLARATION();
 
 	KAL_SPIN_LOCK_FLAG_RESTORE(ulFlags);
 	KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_CMD_PENDING);
-#endif /* CFG_SUPPORT_RX_WORK */
 }
 
 void kalWlanHardStartXmit(void *pvPacket, void *pvDev)

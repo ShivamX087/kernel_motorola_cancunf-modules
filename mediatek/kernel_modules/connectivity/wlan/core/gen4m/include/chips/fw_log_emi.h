@@ -36,12 +36,19 @@ struct FW_LOG_EMI_CTRL {
 	uint32_t base_addr;
 	struct FW_LOG_EMI_SUB_CTRL sub_ctrls[ENUM_FW_LOG_CTRL_TYPE_NUM];
 	void *priv;
+#if CFG_ENABLE_WAKE_LOCK
+	KAL_WAKE_LOCK_T *wakelock;
+#endif
 	struct FW_LOG_EMI_STATS stats;
+
+	struct workqueue_struct *wq;
+	struct work_struct work;
 };
 
 int32_t fw_log_emi_handler(void);
 uint32_t fw_log_emi_start(struct ADAPTER *ad);
 void fw_log_emi_stop(struct ADAPTER *ad);
+void fw_log_emi_set_enabled(struct ADAPTER *ad, u_int8_t enabled);
 uint32_t fw_log_emi_init(struct ADAPTER *ad);
 void fw_log_emi_deinit(struct ADAPTER *ad);
 

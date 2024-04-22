@@ -56,23 +56,19 @@ static void fw_log_emi_update_rp(struct ADAPTER *ad,
 	uint32_t rp)
 {
 	ACQUIRE_POWER_CONTROL_FROM_PM(ad);
-	if (ad->fgIsFwOwn == TRUE) {
-		DBGLOG(INIT, WARN,
-			"Skip due to driver own failed.\n");
-		return;
+
+	if (ad->fgIsFwOwn == FALSE) {
+		DBGLOG(INIT, LOUD,
+			"[%d %s] rp: 0x%x\n",
+			sub_ctrl->type,
+			fw_log_type_to_str(sub_ctrl->type),
+			rp);
+		ccif_set_fw_log_read_pointer(ad,
+					     sub_ctrl->type,
+					     rp);
 	}
 
-	DBGLOG(INIT, LOUD,
-		"[%d %s] rp: 0x%x\n",
-		sub_ctrl->type,
-		fw_log_type_to_str(sub_ctrl->type),
-		rp);
-
-	ccif_set_fw_log_read_pointer(ad,
-				     sub_ctrl->type,
-				     rp);
-
-	wlanReleasePowerControl(ad);
+	RECLAIM_POWER_CONTROL_TO_PM(ad, FALSE);
 }
 
 static u_int8_t fw_log_emi_is_empty(struct FW_LOG_EMI_SUB_CTRL *sub_ctrl)
@@ -159,6 +155,44 @@ static int32_t __fw_log_emi_handler(u_int8_t force)
 	struct ADAPTER *ad = NULL;
 	uint8_t i = 0;
 
+	ad = (struct ADAPTER *)ctrl->priv;
+
+	if (!ad) {
+		stats->skipped++;
+		goto exit;
+	}
+
+#if CFG_ENABLE_WAKE_LOCK
+	KAL_WAKE_LOCK(ad, ctrl->wakelock);
+#endif
+	KAL_ACQUIRE_MUTEX(ad, MUTEX_FW_LOG);
+	for (i = 0; i < ENUM_FW_LOG_CTRL_TYPE_NUM; i++) {
+		struct FW_LOG_EMI_SUB_CTRL *sub_ctrl = &ctrl->sub_ctrls[i];
+
+		__fw_log_emi_sub_handler(ad,
+					 ctrl,
+					 sub_ctrl,
+					 force);
+	}
+	KAL_RELEASE_MUTEX(ad, MUTEX_FW_LOG);
+#if CFG_ENABLE_WAKE_LOCK
+	KAL_WAKE_UNLOCK(ad, ctrl->wakelock);
+#endif
+
+	stats->handled++;
+
+	fw_log_emi_stats_dump(ad, ctrl, FALSE);
+
+exit:
+	return 0;
+}
+
+int32_t fw_log_emi_handler(void)
+{
+	struct FW_LOG_EMI_CTRL *ctrl = &g_fw_log_emi_ctx;
+	struct FW_LOG_EMI_STATS *stats = &ctrl->stats;
+	struct ADAPTER *ad = NULL;
+
 	stats->request++;
 
 	ad = (struct ADAPTER *)ctrl->priv;
@@ -171,28 +205,62 @@ static int32_t __fw_log_emi_handler(u_int8_t force)
 		goto exit;
 	}
 
-	KAL_ACQUIRE_MUTEX(ad, MUTEX_FW_LOG);
-	for (i = 0; i < ENUM_FW_LOG_CTRL_TYPE_NUM; i++) {
-		struct FW_LOG_EMI_SUB_CTRL *sub_ctrl = &ctrl->sub_ctrls[i];
-
-		__fw_log_emi_sub_handler(ad,
-					 ctrl,
-					 sub_ctrl,
-					 force);
-	}
-	KAL_RELEASE_MUTEX(ad, MUTEX_FW_LOG);
-
-	stats->handled++;
-
-	fw_log_emi_stats_dump(ad, ctrl, FALSE);
+	queue_work(ctrl->wq, &ctrl->work);
 
 exit:
 	return 0;
 }
 
-int32_t fw_log_emi_handler(void)
+static void fw_log_emi_work(struct work_struct *work)
 {
-	return __fw_log_emi_handler(FALSE);
+	__fw_log_emi_handler(FALSE);
+}
+
+static u_int8_t __fw_log_emi_should_flush_buffer(struct FW_LOG_EMI_CTRL *ctrl,
+	struct FW_LOG_EMI_SUB_CTRL *sub_ctrl)
+{
+	uint32_t rest = 0;
+
+	if (sub_ctrl->irp == sub_ctrl->wp)
+		return FALSE;
+
+	if (sub_ctrl->irp > sub_ctrl->wp)
+		rest = sub_ctrl->length - sub_ctrl->irp + sub_ctrl->wp;
+	else
+		rest = sub_ctrl->wp - sub_ctrl->irp;
+
+	if (rest >= sub_ctrl->length / 2)
+		return TRUE;
+	else
+		return FALSE;
+}
+
+static void __fw_log_emi_force_reset_buffer(struct ADAPTER *ad,
+	struct FW_LOG_EMI_CTRL *ctrl)
+{
+	uint8_t i = 0;
+
+	KAL_ACQUIRE_MUTEX(ad, MUTEX_FW_LOG);
+	for (i = 0; i < ENUM_FW_LOG_CTRL_TYPE_NUM; i++) {
+		struct FW_LOG_EMI_SUB_CTRL *sub_ctrl = &ctrl->sub_ctrls[i];
+
+		fw_log_emi_refresh_sub_header(ad, ctrl, sub_ctrl);
+
+		if (!__fw_log_emi_should_flush_buffer(ctrl, sub_ctrl))
+			continue;
+
+		DBGLOG(INIT, WARN,
+			"[%d %s] Force reset rp from 0x%x to 0x%x\n",
+			sub_ctrl->type,
+			fw_log_type_to_str(sub_ctrl->type),
+			sub_ctrl->irp,
+			sub_ctrl->wp);
+		sub_ctrl->irp = sub_ctrl->wp;
+		fw_log_emi_update_rp(ad, ctrl, sub_ctrl, sub_ctrl->irp);
+	}
+	KAL_RELEASE_MUTEX(ad, MUTEX_FW_LOG);
+
+	fw_log_emi_stats_dump(ad, ctrl, TRUE);
 }
 
 static u_int8_t __fw_log_emi_check_alignment(uint32_t value)
@@ -392,22 +460,47 @@ void fw_log_emi_stop(struct ADAPTER *ad)
 
 	ctrl->started = FALSE;
 
+	cancel_work_sync(&ctrl->work);
+
 	for (i = 0; i < ENUM_FW_LOG_CTRL_TYPE_NUM; i++)
 		fw_log_emi_sub_ctrl_deinit(ctrl->priv, ctrl, i);
+}
+
+void fw_log_emi_set_enabled(struct ADAPTER *ad, u_int8_t enabled)
+{
+	struct FW_LOG_EMI_CTRL *ctrl = &g_fw_log_emi_ctx;
+
+	DBGLOG(INIT, INFO, "enabled: %d\n", enabled);
+
+	if (enabled)
+		__fw_log_emi_force_reset_buffer(ad, ctrl);
 }
 
 uint32_t fw_log_emi_init(struct ADAPTER *ad)
 {
 	struct FW_LOG_EMI_CTRL *ctrl = &g_fw_log_emi_ctx;
+	uint32_t status = WLAN_STATUS_SUCCESS;
 
 	DBGLOG(INIT, TRACE, "\n");
 
 	kalMemZero(ctrl, sizeof(*ctrl));
 
 	ctrl->priv = ad;
+#if CFG_ENABLE_WAKE_LOCK
+	KAL_WAKE_LOCK_INIT(ad, ctrl->wakelock, "wlan_fw_log");
+#endif
+	ctrl->wq = create_singlethread_workqueue("fw_log_emi");
+	if (!ctrl->wq) {
+		DBGLOG(INIT, ERROR,
+			"create_singlethread_workqueue failed.\n");
+		status = WLAN_STATUS_RESOURCES;
+		goto exit;
+	}
+	INIT_WORK(&ctrl->work, fw_log_emi_work);
 	ctrl->initialized = TRUE;
 
-	return WLAN_STATUS_SUCCESS;
+exit:
+	return status;
 }
 
 void fw_log_emi_deinit(struct ADAPTER *ad)
@@ -417,6 +510,13 @@ void fw_log_emi_deinit(struct ADAPTER *ad)
 	DBGLOG(INIT, TRACE, "\n");
 
 	ctrl->initialized = FALSE;
+	if (ctrl->wq)
+		destroy_workqueue(ctrl->wq);
+#if CFG_ENABLE_WAKE_LOCK
+	if (KAL_WAKE_LOCK_ACTIVE(ad, ctrl->wakelock))
+		KAL_WAKE_UNLOCK(ad, ctrl->wakelock);
+	KAL_WAKE_LOCK_DESTROY(ad, ctrl->wakelock);
+#endif
 	ctrl->priv = NULL;
 }
 

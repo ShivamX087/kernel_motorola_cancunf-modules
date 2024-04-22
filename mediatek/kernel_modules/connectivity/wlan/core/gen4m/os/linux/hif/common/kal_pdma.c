@@ -677,7 +677,10 @@ static u_int8_t kalDevRegReadViaBT(struct GLUE_INFO *prGlueInfo,
 	if (prGlueInfo) {
 		prHifInfo = &prGlueInfo->rHifInfo;
 		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
+		if (!prAdapter) {
+			DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
+			return FALSE;
+		}
 	}
 
 	glGetChipInfo((void **)&prChipInfo);
@@ -796,7 +799,10 @@ static u_int8_t kalDevRegWriteViaBT(struct GLUE_INFO *prGlueInfo,
 	if (prGlueInfo) {
 		prHifInfo = &prGlueInfo->rHifInfo;
 		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
+		if (!prAdapter) {
+			DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
+			return FALSE;
+		}
 	}
 
 	glGetChipInfo((void **)&prChipInfo);
@@ -918,7 +924,10 @@ static u_int8_t kalDevRegReadStatic(struct GLUE_INFO *prGlueInfo,
 	if (prGlueInfo) {
 		prHifInfo = &prGlueInfo->rHifInfo;
 		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
+		if (!prAdapter) {
+			DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
+			return FALSE;
+		}
 	}
 
 	glGetChipInfo((void **)&prChipInfo);
@@ -997,7 +1006,10 @@ u_int8_t kalDevRegRead(struct GLUE_INFO *prGlueInfo,
 	if (prGlueInfo) {
 		prHifInfo = &prGlueInfo->rHifInfo;
 		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
+		if (!prAdapter) {
+			DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
+			return FALSE;
+		}
 	}
 
 	glGetChipInfo((void **)&prChipInfo);
@@ -1012,7 +1024,7 @@ u_int8_t kalDevRegRead(struct GLUE_INFO *prGlueInfo,
 	if (fgIsBusAccessFailed) {
 		DBGLOG_LIMITED(HAL, ERROR, "Bus access failed.\n");
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
-		if (fgTriggerDebugSop) {
+		if (fgTriggerDebugSop && kalIsResetting()) {
 			return kalDevRegReadViaBT(prGlueInfo,
 				u4Register, pu4Value);
 		}
@@ -1075,7 +1087,10 @@ static u_int8_t kalDevRegWriteStatic(struct GLUE_INFO *prGlueInfo,
 	if (prGlueInfo) {
 		prHifInfo = &prGlueInfo->rHifInfo;
 		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
+		if (!prAdapter) {
+			DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
+			return FALSE;
+		}
 	}
 
 	glGetChipInfo((void **)&prChipInfo);
@@ -1163,7 +1178,10 @@ u_int8_t kalDevRegWrite(struct GLUE_INFO *prGlueInfo,
 	if (prGlueInfo) {
 		prHifInfo = &prGlueInfo->rHifInfo;
 		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
+		if (!prAdapter) {
+			DBGLOG(INIT, ERROR, "prAdapter is NULL.\n");
+			return FALSE;
+		}
 	}
 
 	glGetChipInfo((void **)&prChipInfo);
@@ -1178,7 +1196,7 @@ u_int8_t kalDevRegWrite(struct GLUE_INFO *prGlueInfo,
 	if (fgIsBusAccessFailed) {
 		DBGLOG_LIMITED(HAL, ERROR, "Bus access failed.\n");
 #if IS_ENABLED(CFG_MTK_WIFI_CONNV3_SUPPORT)
-		if (fgTriggerDebugSop) {
+		if (fgTriggerDebugSop && kalIsResetting()) {
 			return kalDevRegWriteViaBT(prGlueInfo,
 				u4Register, u4Value);
 		}
@@ -1227,11 +1245,9 @@ u_int8_t kalDevRegWrite(struct GLUE_INFO *prGlueInfo,
 		RTMP_IO_WRITE32(prChipInfo, u4BusAddr, u4Value);
 	} else {
 		if (kalDevRegL1Remap(&u4Register))
-			kalDevRegL1Write(prGlueInfo, prChipInfo, u4Register,
-				u4Value);
+			kalDevRegL1Write(prGlueInfo, prChipInfo, u4Register, u4Value);
 		else
-			kalDevRegL2Write(prGlueInfo, prChipInfo, u4Register,
-				u4Value);
+			kalDevRegL2Write(prGlueInfo, prChipInfo, u4Register, u4Value);
 	}
 #endif
 
@@ -1458,7 +1474,7 @@ static void kalTrackRxReadyTime(struct GLUE_INFO *prGlueInfo, uint16_t u2Port)
 /*----------------------------------------------------------------------------*/
 u_int8_t kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 	uint16_t u2Port, uint32_t u4Len,
-	uint8_t *pucBuf, uint32_t u4ValidOutBufSize)
+	uint8_t *pucBuf, uint32_t u4ValidOutBufSize, u_int8_t isPollMode)
 {
 	struct ADAPTER *prAdapter = NULL;
 	struct GL_HIF_INFO *prHifInfo = NULL;
@@ -1486,7 +1502,9 @@ u_int8_t kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 	pRxD = (struct RXD_STRUCT *)pRxCell->AllocVa;
 	prDmaBuf = &pRxCell->DmaBuf;
 
-	if (halWpdmaGetRxDmaDoneCnt(prGlueInfo, u2Port) == 0)
+	prRxRing->u4LastRxEventWaitDmaDoneCnt =
+		halWpdmaGetRxDmaDoneCnt(prGlueInfo, u2Port);
+	if (prRxRing->u4LastRxEventWaitDmaDoneCnt == 0)
 		return FALSE;
 
 	if (!kalWaitRxDmaDone(prGlueInfo, prRxRing, pRxD, u2Port)) {
@@ -1494,8 +1512,10 @@ u_int8_t kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 			DBGLOG(HAL, ERROR, "RX Done bit not ready(PortRead)\n");
 		}
 		prRxRing->fgIsDumpLog = true;
+		prRxRing->fgIsWaitRxDmaDoneTimeout = true;
 		return FALSE;
-	}
+	} else
+		prRxRing->fgIsWaitRxDmaDoneTimeout = false;
 
 #if HIF_INT_TIME_DEBUG
 	kalTrackRxReadyTime(prGlueInfo, u2Port);
@@ -1518,13 +1538,16 @@ u_int8_t kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 		goto skip;
 	}
 
-	if (pRxD->SDLen0 > u4Len) {
+	if (pRxD->SDLen0 > u4Len || prAdapter->rWifiVar.fgDumpRxEvt) {
 		uint8_t *prBuffer = NULL;
 		uint32_t u4dumpSize = 0;
 
-		DBGLOG(HAL, WARN,
-			"Skip Rx packet, SDL0[%u] > SwRfb max len[%u]\n",
-			pRxD->SDLen0, u4Len);
+		if (pRxD->SDLen0 > u4Len) {
+			DBGLOG(HAL, WARN,
+				"Skip Rx packet, SDL0[%u] > SwRfb max len[%u]\n",
+				pRxD->SDLen0, u4Len);
+		}
+		DBGLOG(RX, ERROR, "Dump RX Event RxD\n");
 		dumpMemory8((uint8_t *)pRxD, sizeof(struct RXD_STRUCT));
 		u4dumpSize = pRxD->SDLen0;
 		if (u4dumpSize > BITS(0, 13))
@@ -1534,14 +1557,15 @@ u_int8_t kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 			if (prMemOps->copyEvent &&
 			    prMemOps->copyEvent(prHifInfo, pRxCell, pRxD,
 						prDmaBuf, prBuffer,
-						sizeof(*prBuffer))) {
-				DBGLOG(RX, ERROR, "Dump RX payload\n");
+						u4dumpSize)) {
+				DBGLOG(RX, ERROR, "Dump RX Event payload\n");
 				DBGLOG_MEM8(RX, ERROR, prBuffer,
-						sizeof(*prBuffer));
+						u4dumpSize);
 			}
 			kalMemFree(prBuffer, VIR_MEM_TYPE, sizeof(prBuffer));
 		}
-		goto skip;
+		if (pRxD->SDLen0 > u4Len)
+			goto skip;
 	}
 
 	NIC_DUMP_RXDMAD_HEADER(prAdapter, "Dump RXDMAD:\n");
@@ -1552,6 +1576,19 @@ u_int8_t kalDevPortRead(struct GLUE_INFO *prGlueInfo,
 				 prDmaBuf, pucBuf, u4Len)) {
 		ASSERT(0);
 		return FALSE;
+	}
+
+	if (isPollMode) {
+		struct WIFI_EVENT *prEvent = (struct WIFI_EVENT *)
+			(pucBuf + prAdapter->chip_info->rxd_size);
+
+		if ((prEvent->u2PacketLength == 0) &&
+		    (pRxD->SDLen0 != prEvent->u2PacketLength)) {
+			DBGLOG(RX, ERROR, "Dump RX Event payload len[%d]\n",
+			       pRxD->SDLen0);
+			DBGLOG_MEM8(RX, ERROR, pucBuf, pRxD->SDLen0);
+			return FALSE;
+		}
 	}
 
 	pRxD->SDPtr0 = (uint64_t)prDmaBuf->AllocPa & DMA_LOWER_32BITS_MASK;
@@ -1908,9 +1945,7 @@ void kalReleaseHifTxDataQLock(struct GL_HIF_INFO *prHifInfo,
 void kalAcquireHifTxRingLock(struct RTMP_TX_RING *prTxRing,
 		unsigned long *plHifTxRingFlags)
 {
-#if !CFG_SUPPORT_RX_WORK
 	unsigned long ulHifTxRingFlags = 0;
-#endif /* CFG_SUPPORT_RX_WORK */
 
 	if (!HAL_IS_TX_DIRECT(prGlueInfo->prAdapter) &&
 		!HAL_IS_RX_DIRECT(prGlueInfo->prAdapter))
@@ -1921,13 +1956,9 @@ void kalAcquireHifTxRingLock(struct RTMP_TX_RING *prTxRing,
 		return;
 	}
 
-#if CFG_SUPPORT_RX_WORK
-	mutex_lock(&prTxRing->rTxDmaQMutex);
-#else /* CFG_SUPPORT_RX_WORK */
 	spin_lock_irqsave(&prTxRing->rTxDmaQLock,
 			ulHifTxRingFlags);
 	*plHifTxRingFlags = ulHifTxRingFlags;
-#endif /* CFG_SUPPORT_RX_WORK */
 }
 
 void kalReleaseHifTxRingLock(struct RTMP_TX_RING *prTxRing,
@@ -1942,12 +1973,8 @@ void kalReleaseHifTxRingLock(struct RTMP_TX_RING *prTxRing,
 		return;
 	}
 
-#if CFG_SUPPORT_RX_WORK
-	mutex_unlock(&prTxRing->rTxDmaQMutex);
-#else /* CFG_SUPPORT_RX_WORK */
 	spin_unlock_irqrestore(&prTxRing->rTxDmaQLock,
 		ulHifTxRingFlags);
-#endif /* CFG_SUPPORT_RX_WORK */
 }
 
 void kalAcquireHifOwnLock(struct ADAPTER *prAdapter)
@@ -2585,13 +2612,22 @@ int wf_ioremap_write(phys_addr_t addr, unsigned int val)
 int32_t wf_reg_read_wrapper(void *priv,
 	uint32_t addr, uint32_t *value)
 {
-	struct GLUE_INFO *glue = priv;
-	struct ADAPTER *ad = glue->prAdapter;
+	struct GLUE_INFO *glue = NULL;
+	struct ADAPTER *ad = NULL;
+	struct CHIP_DBG_OPS *prDebugOps = NULL;
+	bool dumpViaBt = FALSE;
 	int32_t ret = 0;
 
-	if (kalIsHalted()) {
-		DBGLOG_LIMITED(HAL, WARN,
-			"Driver in halted state.\n");
+	if (!priv) {
+		DBGLOG_LIMITED(HAL, WARN, "NULL GLUE.\n");
+		ret = -EFAULT;
+		goto exit;
+	}
+	glue = priv;
+	ad = glue->prAdapter;
+
+	if (!ad) {
+		DBGLOG_LIMITED(HAL, WARN, "NULL ADAPTER.\n");
 		ret = -EFAULT;
 		goto exit;
 	}
@@ -2604,7 +2640,11 @@ int32_t wf_reg_read_wrapper(void *priv,
 		goto exit;
 	}
 
-	if (fgIsBusAccessFailed && fgTriggerDebugSop) {
+	prDebugOps = ad->chip_info->prDebugOps;
+	if (prDebugOps && prDebugOps->checkDumpViaBt)
+		dumpViaBt = prDebugOps->checkDumpViaBt();
+
+	if (dumpViaBt) {
 		DBGLOG_LIMITED(HAL, WARN,
 			"PCIe AER.\n");
 		ret = -EFAULT;
@@ -2620,13 +2660,22 @@ exit:
 int32_t wf_reg_write_wrapper(void *priv,
 	uint32_t addr, uint32_t value)
 {
-	struct GLUE_INFO *glue = priv;
-	struct ADAPTER *ad = glue->prAdapter;
+	struct GLUE_INFO *glue = NULL;
+	struct ADAPTER *ad = NULL;
+	struct CHIP_DBG_OPS *prDebugOps = NULL;
+	bool dumpViaBt = FALSE;
 	int32_t ret = 0;
 
-	if (kalIsHalted()) {
-		DBGLOG_LIMITED(HAL, WARN,
-			"Driver in halted state.\n");
+	if (!priv) {
+		DBGLOG_LIMITED(HAL, WARN, "NULL GLUE.\n");
+		ret = -EFAULT;
+		goto exit;
+	}
+	glue = priv;
+	ad = glue->prAdapter;
+
+	if (!ad) {
+		DBGLOG_LIMITED(HAL, WARN, "NULL ADAPTER.\n");
 		ret = -EFAULT;
 		goto exit;
 	}
@@ -2639,7 +2688,11 @@ int32_t wf_reg_write_wrapper(void *priv,
 		goto exit;
 	}
 
-	if (fgIsBusAccessFailed && fgTriggerDebugSop) {
+	prDebugOps = ad->chip_info->prDebugOps;
+	if (prDebugOps && prDebugOps->checkDumpViaBt)
+		dumpViaBt = prDebugOps->checkDumpViaBt();
+
+	if (dumpViaBt) {
 		DBGLOG_LIMITED(HAL, WARN,
 			"PCIe AER.\n");
 		ret = -EFAULT;
@@ -2655,14 +2708,23 @@ exit:
 int32_t wf_reg_write_mask_wrapper(void *priv,
 	uint32_t addr, uint32_t mask, uint32_t value)
 {
-	struct GLUE_INFO *glue = priv;
-	struct ADAPTER *ad = glue->prAdapter;
+	struct GLUE_INFO *glue = NULL;
+	struct ADAPTER *ad = NULL;
+	struct CHIP_DBG_OPS *prDebugOps = NULL;
+	bool dumpViaBt = FALSE;
 	uint32_t val = 0;
 	int32_t ret = 0;
 
-	if (kalIsHalted()) {
-		DBGLOG_LIMITED(HAL, WARN,
-			"Driver in halted state.\n");
+	if (!priv) {
+		DBGLOG_LIMITED(HAL, WARN, "NULL GLUE.\n");
+		ret = -EFAULT;
+		goto exit;
+	}
+	glue = priv;
+	ad = glue->prAdapter;
+
+	if (!ad) {
+		DBGLOG_LIMITED(HAL, WARN, "NULL ADAPTER.\n");
 		ret = -EFAULT;
 		goto exit;
 	}
@@ -2675,7 +2737,11 @@ int32_t wf_reg_write_mask_wrapper(void *priv,
 		goto exit;
 	}
 
-	if (fgIsBusAccessFailed && fgTriggerDebugSop) {
+	prDebugOps = ad->chip_info->prDebugOps;
+	if (prDebugOps && prDebugOps->checkDumpViaBt)
+		dumpViaBt = prDebugOps->checkDumpViaBt();
+
+	if (dumpViaBt) {
 		DBGLOG_LIMITED(HAL, WARN,
 			"PCIe AER.\n");
 		ret = -EFAULT;
@@ -2696,6 +2762,8 @@ int32_t wf_reg_start_wrapper(enum connv3_drv_type from_drv,
 {
 	struct GLUE_INFO *prGlueInfo = NULL;
 	struct ADAPTER *prAdapter = NULL;
+	struct CHIP_DBG_OPS *prDebugOps = NULL;
+	bool dumpViaBt = FALSE;
 	int32_t ret = 0;
 
 	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);
@@ -2719,13 +2787,19 @@ int32_t wf_reg_start_wrapper(enum connv3_drv_type from_drv,
 		goto exit;
 	}
 
-	if (fgIsBusAccessFailed && fgTriggerDebugSop) {
+	prDebugOps = prAdapter->chip_info->prDebugOps;
+	if (prDebugOps && prDebugOps->checkDumpViaBt)
+		dumpViaBt = prDebugOps->checkDumpViaBt();
+
+	if (dumpViaBt) {
 		DBGLOG_LIMITED(HAL, WARN,
 			"PCIe AER.\n");
 		ret = -EFAULT;
 		goto exit;
 	}
 
+	strlcpy(prAdapter->prGlueInfo->drv_own_caller,
+		__func__, CALLER_LENGTH);
 	halSetDriverOwn(prAdapter);
 	if (prAdapter->fgIsFwOwn == TRUE) {
 		DBGLOG_LIMITED(HAL, WARN,
@@ -2746,6 +2820,8 @@ int32_t wf_reg_end_wrapper(enum connv3_drv_type from_drv,
 {
 	struct GLUE_INFO *prGlueInfo = NULL;
 	struct ADAPTER *prAdapter = NULL;
+	struct CHIP_DBG_OPS *prDebugOps = NULL;
+	bool dumpViaBt = FALSE;
 	int32_t ret = 0;
 
 	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);
@@ -2769,13 +2845,19 @@ int32_t wf_reg_end_wrapper(enum connv3_drv_type from_drv,
 		goto exit;
 	}
 
-	if (fgIsBusAccessFailed && fgTriggerDebugSop) {
+	prDebugOps = prAdapter->chip_info->prDebugOps;
+	if (prDebugOps && prDebugOps->checkDumpViaBt)
+		dumpViaBt = prDebugOps->checkDumpViaBt();
+
+	if (dumpViaBt) {
 		DBGLOG_LIMITED(HAL, WARN,
 			"PCIe AER.\n");
 		ret = -EFAULT;
 		goto exit;
 	}
 
+	strlcpy(prAdapter->prGlueInfo->fw_own_caller,
+		__func__, CALLER_LENGTH);
 	halSetFWOwn(prAdapter, FALSE);
 	DBGLOG(INIT, INFO, "prAdapter->u4PwrCtrlBlockCnt = %u\n",
 			prAdapter->u4PwrCtrlBlockCnt);

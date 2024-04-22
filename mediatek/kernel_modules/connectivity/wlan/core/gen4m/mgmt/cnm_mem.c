@@ -240,7 +240,7 @@ struct MSDU_INFO *cnmPktAlloc(struct ADAPTER *prAdapter, uint32_t u4Length)
 	KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_TX_MSDU_INFO_LIST);
 
 	if (!prMsduInfo)
-		return NULL;
+		goto exit;
 
 	kalMemZero(prMsduInfo, sizeof(struct MSDU_INFO));
 
@@ -261,7 +261,8 @@ struct MSDU_INFO *cnmPktAlloc(struct ADAPTER *prAdapter, uint32_t u4Length)
 			QUEUE_INSERT_TAIL(prQueList, &prMsduInfo->rQueEntry);
 			KAL_RELEASE_SPIN_LOCK(prAdapter,
 				SPIN_LOCK_TX_MSDU_INFO_LIST);
-			return NULL;
+			prMsduInfo = NULL;
+			goto exit;
 		}
 		prMsduInfo->prHead = prHead;
 		prMsduInfo->prPacket = (uint8_t *)
@@ -276,9 +277,8 @@ struct MSDU_INFO *cnmPktAlloc(struct ADAPTER *prAdapter, uint32_t u4Length)
 	}
 
 
-#if DBG
+exit:
 	if (prMsduInfo == NULL) {
-		log_dbg(MEM, WARN, "\n");
 		log_dbg(MEM, WARN, "MgtDesc#=%ld\n", prQueList->u4NumElem);
 
 #if CFG_DBG_MGT_BUF
@@ -287,10 +287,7 @@ struct MSDU_INFO *cnmPktAlloc(struct ADAPTER *prAdapter, uint32_t u4Length)
 			prAdapter->rMgtBufInfo.u4FreeCount,
 			prAdapter->rMgtBufInfo.u4AllocNullCount);
 #endif
-
-		log_dbg(MEM, WARN, "\n");
 	}
-#endif
 
 	return prMsduInfo;
 }
@@ -497,6 +494,11 @@ void *cnmMemAlloc(struct ADAPTER *prAdapter, enum ENUM_RAM_TYPE eRamType,
 		prMemTrack->pucFileAndLine = fileAndLine;
 		prMemTrack->u2CmdIdAndWhere = 0x0000;
 		pvMemory = (void *)(prMemTrack + 1);
+	} else {
+		DBGLOG(MEM, WARN,
+			"kalMemAlloc fail, type: %d sz: %u\n",
+			eMemAllocType,
+			u4Length + sizeof(struct MEM_TRACK));
 	}
 #else
 	pvMemory = (void *) kalMemAlloc(u4Length, eMemAllocType);
@@ -851,15 +853,15 @@ static void cnmStaRoutinesForAbort(struct ADAPTER *prAdapter,
 void cnmStaFreeAllStaByNetwork(struct ADAPTER *prAdapter, uint8_t ucBssIndex,
 	uint8_t ucStaRecIndexExcluded)
 {
-#if CFG_ENABLE_WIFI_DIRECT
 	struct BSS_INFO *prBssInfo;
-#endif
 	struct STA_RECORD *prStaRec;
 	uint16_t i;
 	enum ENUM_STA_REC_CMD_ACTION eAction;
 
 	if (ucBssIndex > prAdapter->ucHwBssIdNum)
 		return;
+
+	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIndex);
 
 	if (ucStaRecIndexExcluded < CFG_STA_REC_NUM)
 		eAction = STA_REC_CMD_ACTION_BSS_EXCLUDE_STA;
@@ -869,6 +871,11 @@ void cnmStaFreeAllStaByNetwork(struct ADAPTER *prAdapter, uint8_t ucBssIndex,
 	cnmStaSendRemoveCmd(prAdapter,
 		eAction,
 		ucStaRecIndexExcluded, ucBssIndex);
+
+#if (CFG_SUPPORT_802_11BE_MLO == 1)
+	mldBssTeardownAllClients(prAdapter,
+		mldBssGetByBss(prAdapter, prBssInfo));
+#endif
 
 	for (i = 0; i < CFG_STA_REC_NUM; i++) {
 		prStaRec = (struct STA_RECORD *) &prAdapter->arStaRec[i];
@@ -883,7 +890,6 @@ void cnmStaFreeAllStaByNetwork(struct ADAPTER *prAdapter, uint8_t ucBssIndex,
 	 *        be invoked after state sync of STA_REC
 	 * Update system operation parameters for AP mode
 	 */
-	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIndex);
 	if (prAdapter->fgIsP2PRegistered &&
 	    prBssInfo &&
 	    prBssInfo->eCurrentOPMode == OP_MODE_ACCESS_POINT) {
@@ -1249,8 +1255,17 @@ void cnmStaSendUpdateCmd(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec,
 			&= prAdapter->rWifiVar.ucHtAmsduInAmpduRx;
 	}
 
-	prCmdContent->u4TxMaxAmsduInAmpduLen
-		= prAdapter->rWifiVar.u4TxMaxAmsduInAmpduLen;
+	if ((prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11BE) ||
+	    (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11AX))
+		prCmdContent->u4TxMaxAmsduInAmpduLen =
+			prAdapter->rWifiVar.u4TxMaxAmsduInAmpduLen;
+	else if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11AC)
+		prCmdContent->u4TxMaxAmsduInAmpduLen =
+			prAdapter->rWifiVar.u4VhtTxMaxAmsduInAmpduLen;
+	else if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11N)
+		prCmdContent->u4TxMaxAmsduInAmpduLen =
+			prAdapter->rWifiVar.u4HtTxMaxAmsduInAmpduLen;
+
 #if (CFG_SUPPORT_802_11BE == 1)
 	if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11BE) {
 		prCmdContent->rBaSize.rEhtBaSize.u2RxBaSize =
@@ -2097,7 +2112,19 @@ cnmPeerUpdate(struct ADAPTER *prAdapter, void *pvSetBuffer,
 					}
 				}
 			}
+#if CFG_SUPPORT_TDLS_11AX
+			if (prCmd->fgIsSupHe)
+				prStaRec->ucPhyTypeSet |= PHY_TYPE_BIT_HE;
+
+			if (prCmd->fgIsSupVht)
+				prStaRec->ucPhyTypeSet |= PHY_TYPE_BIT_VHT;
+#endif
 		} else {
+#if CFG_SUPPORT_TDLS_11AX
+			if (prCmd->fgIsSupHe)
+				prStaRec->ucPhyTypeSet |= PHY_TYPE_BIT_HE;
+#endif
+
 			if (prCmd->fgIsSupVht)
 				prStaRec->ucPhyTypeSet |= PHY_TYPE_BIT_VHT;
 
@@ -2262,6 +2289,33 @@ cnmPeerUpdate(struct ADAPTER *prAdapter, void *pvSetBuffer,
 			VHT_OP_MODE_RX_NSS;
 	}
 #endif /* CFG_SUPPORT_802_11AC */
+
+#if CFG_SUPPORT_TDLS_11AX
+	/* ++HE capability */
+	if (prCmd->fgIsSupHe) {
+		kalMemCopy(prStaRec->ucHeMacCapInfo,
+			prCmd->rHeCap.ucHeMacCapInfo, HE_MAC_CAP_BYTE_NUM);
+		kalMemCopy(prStaRec->ucHePhyCapInfo,
+			prCmd->rHeCap.ucHePhyCapInfo, HE_PHY_CAP_BYTE_NUM);
+#if (CFG_SUPPORT_WIFI_6G == 1)
+		prStaRec->u2He6gBandCapInfo = HE_6G_CAP_INFO_DEFAULT_VAL;
+#endif
+
+		for (i = 0; i < 8; i++) {
+			uint8_t ucOffset = i * 2;
+			uint8_t ucMcsMap;
+
+			if (i < wlanGetSupportNss(prAdapter,
+				prBssInfo->ucBssIndex))
+				ucMcsMap = HE_CAP_INFO_MCS_MAP_MCS11;
+			else
+				ucMcsMap = HE_CAP_INFO_MCS_NOT_SUPPORTED;
+
+			prStaRec->u2HeRxMcsMapBW80 |= (ucMcsMap << ucOffset);
+			prStaRec->u2HeTxMcsMapBW80 |= (ucMcsMap << ucOffset);
+		}
+	}
+#endif
 
 	cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_3);
 
