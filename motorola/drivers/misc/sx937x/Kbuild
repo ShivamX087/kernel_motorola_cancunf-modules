@@ -49,7 +49,7 @@ else
         EXTRA_CFLAGS += -I$(ANDROID_BUILD_TOP)/kernel/drivers/base
 endif
 
-KBUILD_EXTRA_SYMBOLS += $(CURDIR)/$(KBUILD_EXTMOD)/../../sensors/$(GKI_OBJ_MODULE_DIR)/Module.symvers
+KBUILD_EXTRA_SYMBOLS += $(abspath $(O)/../vendor/motorola/drivers/sensors/Module.symvers)
 
 #sx937x_sar-y := sx937x_sar.o
 
