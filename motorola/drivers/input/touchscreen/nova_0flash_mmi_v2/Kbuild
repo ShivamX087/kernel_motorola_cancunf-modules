@@ -5,12 +5,9 @@ EXTRA_CFLAGS += \
 EXTRA_CFLAGS += -I$(ANDROID_BUILD_TOP)/vendor/motorola/include \
 		-I$(ANDROID_BUILD_TOP)/vendor/motorola/drivers/input/touchscreen/nova_0flash_mmi_v2
 
-ifeq ($(filter m y, $(CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI)),)
-	obj-m := nova_0flash_mmi_v2.o
-endif
-ifneq ($(filter m y,$(CONFIG_INPUT_NOVA_0FLASH_MMI_ENABLE_DOUBLE_TAP)),)
+ifneq ($(filter m y,$(CONFIG_BOARD_USES_DOUBLE_TAP_CTRL)),)
 	EXTRA_CFLAGS += -DNVT_SENSOR_EN
-	KBUILD_EXTRA_SYMBOLS += $(CURDIR)/$(KBUILD_EXTMOD)/../../../sensors/$(GKI_OBJ_MODULE_DIR)/Module.symvers
+	KBUILD_EXTRA_SYMBOLS += $(abspath $(O)/../vendor/motorola/drivers/sensors/Module.symvers)
 endif
 ifneq ($(filter m y,$(CONFIG_INPUT_NOVA_0FLASH_MMI_NOTIFY_TOUCH_STATE)),)
 	EXTRA_CFLAGS += -DNVT_SET_TOUCH_STATE
@@ -88,6 +85,7 @@ ifeq ($(TARGET_BUILD_VARIANT),userdebug)
 	EXTRA_CFLAGS += -DNVT_BUILD_USERDEBUG
 endif
 
+obj-m := nova_0flash_mmi_v2.o
 nova_0flash_mmi_v2-objs += nt36xxx.o
 nova_0flash_mmi_v2-objs += nt36xxx_ext_proc.o
 nova_0flash_mmi_v2-objs += nt36xxx_fw_update.o
