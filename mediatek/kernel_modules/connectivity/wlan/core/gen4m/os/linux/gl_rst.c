@@ -72,6 +72,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/workqueue.h>
+#include <linux/suspend.h>
 
 #include "precomp.h"
 #include "gl_coredump.h"
