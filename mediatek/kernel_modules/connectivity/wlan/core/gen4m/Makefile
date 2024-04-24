@@ -98,7 +98,6 @@ $(info $$MTK_PLATFORM is [${MTK_PLATFORM}])
 $(info $$CONFIG_WLAN_PLATFORM is [${CONFIG_WLAN_PLATFORM}])
 $(info $$WLAN_CHIP_ID is [${WLAN_CHIP_ID}])
 $(info $$MTK_COMBO_CHIP is [${MTK_COMBO_CHIP}])
-$(info $$WLAN_CONNAC3_DEV is [${WLAN_CONNAC3_DEV}])
 
 ifneq ($(CONFIG_MTK_EMI_LEGACY),)
 ccflags-y += -DCONFIG_WLAN_MTK_EMI=1
@@ -889,11 +888,6 @@ endif
 ifeq ($(MTK_ANDROID_WMT), y)
     ccflags-y += -DCFG_MTK_ANDROID_WMT=1
     WMT_SUPPORT := y
-    CONFIG_AOSP_LINK_LAYER_STATS_SUPPORT=y
-    CONFIG_AOSP_MDDP_LINK_LAYER_STATS_SUPPORT=y
-    CONFIG_TX_DELAY_STATS_SUPPORT=y
-    CONFIG_SUPPORT_SEPARATE_TXS_PID_POOL=y
-    CONFIG_MSCS_FAST_PATH_SUPPORT=y
 else ifneq ($(filter MT6632,$(MTK_COMBO_CHIP)),)
     ccflags-y += -DCFG_MTK_ANDROID_WMT=1
     WMT_SUPPORT := y
@@ -1944,7 +1938,7 @@ else
     ccflags-y += -Wframe-larger-than=2048
 endif
 
-extra_symbols := $(abspath $(O)/../vendor/mediatek/kernel_modules/connectivity/conninfra/Module.symvers)
+extra_symbols := $(abspath $(O)/../vendor/mediatek/kernel_modules/connectivity/common/Module.symvers)
 extra_symbols += $(abspath $(O)/../vendor/mediatek/kernel_modules/connectivity/connfem/Module.symvers)
 extra_symbols += $(abspath $(O)/../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/Module.symvers)
 

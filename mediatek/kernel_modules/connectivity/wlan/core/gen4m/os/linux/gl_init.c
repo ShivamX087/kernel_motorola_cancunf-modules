@@ -114,7 +114,6 @@
 #if CFG_SUPPORT_CSI
 #include "gl_csi.h"
 #endif
-#include "conn_dbg.h"
 
 /*******************************************************************************
  *                              C O N S T A N T S
@@ -3840,8 +3839,6 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 	if (prWdev == NULL) {
 		DBGLOG(INIT, ERROR,
 		       "No wireless dev exist, abort power on\n");
-		conn_dbg_add_log(CONN_DBG_LOG_TYPE_HW_ERR,
-			"No wireless dev exist, abort power on\n");
 		return NULL;
 	}
 
@@ -6691,8 +6688,6 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 			i4Status = prChipInfo->fw_dl_ops->mcu_init(prAdapter);
 		if (i4Status != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, ERROR, "WF MCU init failed.\n");
-			conn_dbg_add_log(CONN_DBG_LOG_TYPE_HW_ERR,
-				"WF MCU init failed.\n");
 			eFailReason = ROM_DL_FAIL;
 			break;
 		}
