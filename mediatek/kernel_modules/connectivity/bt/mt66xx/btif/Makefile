@@ -21,36 +21,24 @@ KBUILD_MODPOST_FAIL_ON_WARNINGS := y
 # platform
 
 ifeq ($(CONFIG_WLAN_DRV_BUILD_IN),y)
-  $(info build-in mode!)
-  $(info _MTK_BT_CHIP = $(_MTK_BT_CHIP))
   # _MTK_BT_CHIP comes from conninfra setting
   BT_PLATFORM = $(patsubst MTK_CONSYS_MT%,%,$(strip $(_MTK_BT_CHIP)))
 endif
 
 
-$(info $(LOG_TAG) TARGET_BUILD_VARIANT = $(TARGET_BUILD_VARIANT))
-ifeq ("$(TARGET_BUILD_VARIANT)","user")
-    ccflags-y += -D FW_LOG_DEFAULT_ON=0
-else
-    ccflags-y += -D FW_LOG_DEFAULT_ON=1
-endif
+ccflags-y += -D FW_LOG_DEFAULT_ON=0
 
 
 ccflags-y += -D CONNAC20_CHIPID=$(BT_PLATFORM)
-$(info $(LOG_TAG) BT_PLATFORM = $(BT_PLATFORM))
-$(info $(LOG_TAG) srctree = $(srctree))
 
 # connsys security
 ifneq ($(filter 6983, $(BT_PLATFORM)),)
-$(info $(LOG_TAG) support bin to img)
     ccflags-y += -D SUPPORT_BIN2IMG=1
     ccflags-y += -D CFG_BT_ATF_SUPPORT=1
 else ifneq ($(filter 6886, $(BT_PLATFORM)),)
-$(info $(LOG_TAG) support bin to img)
     ccflags-y += -D SUPPORT_BIN2IMG=1
     ccflags-y += -D CFG_BT_ATF_SUPPORT=1
 else
-$(info $(LOG_TAG) not support bin to img)
     ccflags-y += -D SUPPORT_BIN2IMG=0
     ccflags-y += -D CFG_BT_ATF_SUPPORT=0
 endif

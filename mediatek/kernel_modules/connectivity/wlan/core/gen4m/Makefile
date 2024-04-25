@@ -23,8 +23,6 @@ hif=pcie
 include $(srctree)/$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/Makefile.x86
 src:=$(srctree)/$(shell echo ${src})
 MTK_COMBO_CHIP=MT7961
-$(info Kbuild chip: $(MTK_COMBO_CHIP))
-$(info Kbuild hif : $(CONFIG_MTK_COMBO_WIFI_HIF))
 endif
 endif
 endif
@@ -58,7 +56,6 @@ endif
 ifndef TOP
     TOP := $(srctree)/..
 endif
-$(info os option: $(os))
 
 # script for check the kernel version condition
 # example check kernel >= 5.4 : $(call kver_ge,5,4)
@@ -92,12 +89,6 @@ ccflags-y += $(WLAN_CHIP_LIST)
 ifeq ($(MTK_COMBO_CHIP),)
 MTK_COMBO_CHIP = MT6632
 endif
-
-$(info $$WM_RAM is [${WM_RAM}])
-$(info $$MTK_PLATFORM is [${MTK_PLATFORM}])
-$(info $$CONFIG_WLAN_PLATFORM is [${CONFIG_WLAN_PLATFORM}])
-$(info $$WLAN_CHIP_ID is [${WLAN_CHIP_ID}])
-$(info $$MTK_COMBO_CHIP is [${MTK_COMBO_CHIP}])
 
 ifneq ($(CONFIG_MTK_EMI_LEGACY),)
 ccflags-y += -DCONFIG_WLAN_MTK_EMI=1
@@ -921,7 +912,6 @@ ifeq ($(CONFIG_MTK_WIFI_CONNV3_SUPPORT), y)
     else
         CONFIG_MTK_WIFI_CONNV3_PATH ?= $(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra
     endif
-    $(info $$CONFIG_MTK_WIFI_CONNV3_PATH is [${CONFIG_MTK_WIFI_CONNV3_PATH}])
     ccflags-y += -I$(CONFIG_MTK_WIFI_CONNV3_PATH)/include
     ccflags-y += -I$(CONFIG_MTK_WIFI_CONNV3_PATH)/base/include
     ccflags-y += -I$(CONFIG_MTK_WIFI_CONNV3_PATH)/conn_drv/connv3/debug_utility
@@ -1045,13 +1035,6 @@ else
     ccflags-y += -DCFG_SUPPORT_AEE=0
 endif
 
-# Disable ASSERT() for user load, enable for others
-ifneq ($(TARGET_BUILD_VARIANT),user)
-    ccflags-y += -DBUILD_QA_DBG=1
-else
-    ccflags-y += -DBUILD_QA_DBG=0
-endif
-
 ifeq ($(CONFIG_MTK_COMBO_WIFI),y)
     ccflags-y += -DCFG_WPS_DISCONNECT=1
 endif
@@ -1098,7 +1081,6 @@ endif
 
 ifneq ($(CFG_CFG80211_VERSION),)
 VERSION_STR = $(subst \",,$(subst ., , $(subst -, ,$(subst v,,$(CFG_CFG80211_VERSION)))))
-$(info VERSION_STR=$(VERSION_STR))
 X = $(firstword $(VERSION_STR))
 Y = $(word 2 ,$(VERSION_STR))
 Z = $(word 3 ,$(VERSION_STR))
@@ -1107,11 +1089,10 @@ ifeq ($Z, )
 endif
 VERSION := $(shell echo "$$(( $X * 65536 + $Y * 256 + $Z))" )
 ccflags-y += -DCFG_CFG80211_VERSION=$(VERSION)
-$(info DCFG_CFG80211_VERSION=$(VERSION))
 endif
 
 ccflags-y += -DCFG_SUPPORT_PASSPOINT=1
-ccflags-y += -DCFG_HS20_DEBUG=1
+ccflags-y += -DCFG_HS20_DEBUG=0
 
 MTK_MET_PROFILING_SUPPORT = yes
 ifeq ($(MTK_MET_PROFILING_SUPPORT), yes)
@@ -1363,11 +1344,9 @@ obj-$(CONFIG_MTK_COMBO_WIFI) += $(MODULE_NAME).o
 endif
 
 ifeq ($(CONFIG_WLAN_DRV_BUILD_IN),y)
-$(warning $(MODULE_NAME) build-in boot.img)
 obj-y += $(MODULE_NAME).o
 ccflags-y += -DCONFIG_WLAN_DRV_BUILD_IN=1
 else
-$(warning $(MODULE_NAME) is kernel module)
 obj-m += $(MODULE_NAME).o
 ccflags-y += -DCONFIG_WLAN_DRV_BUILD_IN=0
 endif
@@ -1462,7 +1441,6 @@ CHIPS_CMM   := $(CHIPS)common/
 
 ifneq ($(CONFIG_WLAN_PLATFORM),)
 PLAT_DIR    := os/$(os)/plat/$(CONFIG_WLAN_PLATFORM)/
-$(info $$PLAT_DIR is [$(PLAT_DIR)])
 endif
 SYSDVT_DIR  := dvt/
 
@@ -1864,7 +1842,6 @@ ifneq ($(CONFIG_MTK_COMBO_WIFI_HIF), none)
 ifneq ($(findstring wlan_service,$(MTK_WLAN_SERVICE_PATH)),)
 MTK_WLAN_SERVICE=yes
 SERVICE_DIR  := $(MTK_WLAN_SERVICE_PATH)
-$(info SERVICE_DIR is [{$(MTK_WLAN_SERVICE_PATH)}])
 endif
 endif
 
@@ -1875,7 +1852,6 @@ ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4
 ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(SERVICE_DIR)service/include
 ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(SERVICE_DIR)glue/osal/include
 ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m/$(SERVICE_DIR)glue/hal/include
-$(info $$CCFLAG is [{$(ccflags-y)}])
 SERVICE_OBJS := $(SERVICE_DIR)agent/agent.o \
                 $(SERVICE_DIR)service/service_test.o \
                 $(SERVICE_DIR)service/test_engine.o \
@@ -1883,7 +1859,6 @@ SERVICE_OBJS := $(SERVICE_DIR)agent/agent.o \
                 $(SERVICE_DIR)glue/osal/gen4m/net_adaption_gen4m.o \
                 $(SERVICE_DIR)glue/hal/gen4m/operation_gen4m.o
 $(MODULE_NAME)-objs  += $(SERVICE_OBJS)
-$(info $$MTK_WLAN_SERVICE is [{$(SERVICE_OBJS)}])
 else
 ccflags-y += -DCONFIG_WLAN_SERVICE=0
 ccflags-y += -DCONFIG_TEST_ENGINE_OFFLOAD=0

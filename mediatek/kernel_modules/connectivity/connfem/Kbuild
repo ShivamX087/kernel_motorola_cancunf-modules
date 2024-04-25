@@ -31,12 +31,6 @@ ccflags-y += -Werror
 ###############################################################################
 # Compile Options
 ###############################################################################
-ifneq ($(TARGET_BUILD_VARIANT), user)
-    ccflags-y += -D CONNFEM_DBG=1
-else
-    ccflags-y += -D CONNFEM_DBG=0
-endif
-
 
 ###############################################################################
 # Include Paths
@@ -65,10 +59,7 @@ $(MODULE_NAME)-objs += connfem_cfg.o
 INTERNAL_PATH := $(wildcard $(TOP)/vendor/mediatek/internal/connfem_enable)
 
 ifneq ($(INTERNAL_PATH),)
-    $(info ConnFem: MTK internal load)
     $(MODULE_NAME)-objs += connfem_internal.o
-else
-    $(info ConnFem: Run time check load)
 endif
 
 
